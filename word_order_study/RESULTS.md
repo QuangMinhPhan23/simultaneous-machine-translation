@@ -45,9 +45,12 @@ test is the quality-vs-latency curve below.**
 
 ## Result 3 - training (Step 4, in progress)
 
-10 systems (5 languages × 2 chunking methods), LoRA Stage-II on the EAST-8B base, adapters pushed to
-Hugging Face (`Henry236/east8b-<lang>-lora-<method>`). First adapter (korean/generic) trained and
-verified in ~27 min on one A100; the rest are running.
+10 systems (5 languages x 2 chunking methods), LoRA Stage-II fine-tuning on the EAST-8B base. Each
+adapter is pushed to Hugging Face as `Henry236/east8b-<lang>-lora-<method>`.
+
+**8 of the 10 are trained and verified** (Egyptian, Korean, MSA and Saudi, both methods each). The two
+Vietnamese runs are still queued. Each run takes 20 to 30 minutes on one A100 or L40S GPU, so training
+is not the bottleneck; waiting for a free GPU on the shared cluster is.
 
 ## The real test (Step 5, pending)
 
