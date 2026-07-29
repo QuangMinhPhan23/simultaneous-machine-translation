@@ -1,0 +1,80 @@
+#!/bin/bash
+# Word-order study, Step 4: LoRA Stage II training. Reuses east_scripts/train/finetune_lora_stage2.py.
+# Base = biaofu-xmu/EAST-8B (EAST-Stage-I; Llama-3, eot <|eot_id|>). Config: LoRA r64/a128/drop0.05,
+# lr1e-5 cosine, warmup0.1, cutoff1024, 2 epochs.
+#
+# Trains on word_order_study/data/<lang>/simt-<method>.train.json (or -retry if RETRY=1), and pushes the
+# LoRA ADAPTER (--adapter_only, ~160MB, not the 16GB merged model) to
+# Henry236/east8b-<langcode>-lora-<method> (private). Eval loads base + adapter.
+#
+# A full 8B Stage-II LoRA on ~10-12k examples is ~45-60 min, but $TMPDIR is wiped per job, so use an
+# ample walltime: 6h for full, 2h for smoke. Submit FROM THE REPO ROOT, walltime + gpu_model on the line.
+#
+#   SMOKE FIRST (validates base download + LoRA + data + push chain; no HF push):
+#   qsub -l walltime=2:00:00 -l select=1:ncpus=8:mem=64gb:ngpus=1:gpu_model=H200 -v LANGUAGE=korean,METHOD=generic,MAX_EXAMPLES=64 word_order_study/submit_train.pbs
+#
+#   FULL:
+#   qsub -l walltime=6:00:00 -l select=1:ncpus=8:mem=64gb:ngpus=1:gpu_model=H200 -v LANGUAGE=korean,METHOD=generic word_order_study/submit_train.pbs
+#PBS -l select=1:ncpus=8:mem=64gb:ngpus=1:gpu_model=H200
+#PBS -l walltime=6:00:00
+#PBS -j oe
+#PBS -N wo-train
+
+cd "$PBS_O_WORKDIR"
+set -e
+if [ ! -f east_scripts/env.sh ] && [ -f ../east_scripts/env.sh ]; then cd ..; fi
+[ -f east_scripts/env.sh ] || { echo "ERROR: submit from the EAST repo root. PWD=$(pwd)" >&2; exit 1; }
+echo "Working dir: $(pwd)"
+
+: "${LANGUAGE:?Set LANGUAGE=vietnamese|msa|korean|saudi|egyptian via qsub -v}"
+: "${METHOD:?Set METHOD=generic|specific via qsub -v}"
+MAX_EXAMPLES=${MAX_EXAMPLES:-}
+RETRY=${RETRY:-}
+
+module load python/3.11.3
+python3 -m venv "$TMPDIR/east-venv"
+source "$TMPDIR/east-venv/bin/activate"
+source east_scripts/env.sh
+bash east_scripts/setup_katana_env.sh
+
+if [ -z "${HF_TOKEN:-}" ] && [ -f "$HOME/.hf_token" ]; then HF_TOKEN=$(cat "$HOME/.hf_token"); export HF_TOKEN; fi
+: "${HF_TOKEN:?Set HF_TOKEN via ~/.hf_token}"
+
+export EAST_CACHE=${EAST_CACHE:-$TMPDIR/east_cache}
+mkdir -p "$EAST_CACHE/huggingface" "$EAST_CACHE/torch"
+export HF_HOME="$EAST_CACHE/huggingface"
+export HF_HUB_CACHE="$EAST_CACHE/huggingface/hub"
+export TORCH_HOME="$EAST_CACHE/torch"
+
+case "$LANGUAGE" in
+    vietnamese) LC=vi;; msa) LC=msa;; korean) LC=ko;; saudi) LC=sa;; egyptian) LC=eg;;
+    *) echo "unknown LANGUAGE=$LANGUAGE" >&2; exit 1;;
+esac
+RSUF=""; [ -n "$RETRY" ] && RSUF="-retry"
+DATA_FILE="word_order_study/data/${LANGUAGE}/simt-${METHOD}${RSUF}.train.json"
+[ -f "$DATA_FILE" ] || { echo "ERROR: ${DATA_FILE} not found (chunk-gen must finish first)" >&2; exit 1; }
+
+echo "=== nvidia-smi (confirm a GPU before this eats walltime) ==="
+nvidia-smi || echo "WARNING: no GPU visible despite ngpus=1"
+
+BASE_MODEL="biaofu-xmu/EAST-8B"
+OUT_DIR="${EAST_CACHE}/east8b-${LC}-lora-${METHOD}${RSUF}"
+EXTRA=""
+if [ -n "$MAX_EXAMPLES" ]; then
+    echo "=== SMOKE: --max_examples ${MAX_EXAMPLES}, 1 epoch, no HF push ==="
+    EXTRA="--max_examples ${MAX_EXAMPLES} --num_train_epochs 1"
+    unset HF_REPO_ID
+else
+    export HF_REPO_ID="Henry236/east8b-${LC}-lora-${METHOD}${RSUF}"
+    echo "=== FULL Stage II -> will push LoRA adapter to HF ${HF_REPO_ID} ==="
+fi
+
+echo "=== Step 4 train: LANGUAGE=${LANGUAGE} METHOD=${METHOD}${RSUF} base=${BASE_MODEL} data=${DATA_FILE} ==="
+time python ./east_scripts/train/finetune_lora_stage2.py \
+    --model_path "${BASE_MODEL}" \
+    --eot_token "<|eot_id|>" \
+    --data_path "${DATA_FILE}" \
+    --output_dir "${OUT_DIR}" \
+    --adapter_only ${EXTRA}
+
+echo "DONE. ${HF_REPO_ID:+pushed adapter to HF ${HF_REPO_ID}}"

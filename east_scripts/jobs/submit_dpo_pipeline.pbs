@@ -1,0 +1,43 @@
+#!/bin/bash
+# PBS job that runs the DPO/CPO pipeline (run_arabic_dpo_finetune.sh) in the
+# background, so no terminal or JupyterLab session needs to stay open.
+#
+# HF_TOKEN is read from ~/.hf_token; never hardcode it in this file. Write it once:
+#
+#   umask 077 && read -s -p "HF token: " tok && echo "$tok" > ~/.hf_token && unset tok
+#
+# Then submit, passing the other variables with -V:
+#
+#   export HF_REPO_ID=Henry236/east-arabic-eg-cpo-final    # or whichever stage
+#   export SFT_MODEL=Henry236/east-arabic-eg-lora_replay   # or whichever checkpoint to continue from
+#   cd ~/ondemand/EAST
+#   qsub -V east_scripts/jobs/submit_dpo_pipeline.pbs
+#PBS -l select=1:ncpus=8:mem=64gb:ngpus=1
+#PBS -l walltime=04:00:00
+#PBS -j oe
+#PBS -N east-arabic-dpo
+
+cd "$PBS_O_WORKDIR"
+set -e
+
+# --- Environment setup ---
+# Rebuilt every job, because $TMPDIR is node-local and wiped when the job ends.
+module load python/3.11.3
+python3 -m venv "$TMPDIR/east-venv"
+source "$TMPDIR/east-venv/bin/activate"
+source east_scripts/env.sh
+bash east_scripts/setup_katana_env.sh
+pip install -U "trl>=0.15"
+
+# --- Check the env vars arrived ---
+# HF_TOKEN does not survive qsub -V on this cluster, so read it from the file.
+if [ -z "$HF_TOKEN" ] && [ -f "$HOME/.hf_token" ]; then
+    HF_TOKEN=$(cat "$HOME/.hf_token")
+    export HF_TOKEN
+fi
+: "${HF_TOKEN:?Set HF_TOKEN via ~/.hf_token (see header comment) -- qsub -V does not pass it through on this cluster}"
+: "${SFT_MODEL:?Set SFT_MODEL (checkpoint to continue from) and resubmit with 'qsub -V'}"
+
+# --- The actual pipeline ---
+export HF_REPO_ID="${HF_REPO_ID:-Henry236/east-arabic-eg-dpo-batch}"
+bash east_scripts/jobs/run_arabic_dpo_finetune.sh

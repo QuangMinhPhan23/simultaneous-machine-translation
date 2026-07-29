@@ -1,0 +1,79 @@
+#!/bin/bash
+# Eval-only PBS job: runs simuleval_standalone.py on an already-trained
+# checkpoint against the all-domain test set. Submit one job per
+# (MODEL_LABEL, VARIANT, LATENCY) cell. MODEL_PATH is normally an HF Hub repo
+# id, since $TMPDIR from the training job is already gone.
+#
+# HF_TOKEN is read from ~/.hf_token; never hardcode it in this file. Write it once:
+#   umask 077 && read -s -p "HF token: " tok && echo "$tok" > ~/.hf_token && unset tok
+#
+# Always pass -l walltime= on the command line: the #PBS line below is not
+# reliably honored, and the walltime also picks the queue tier. 2h is enough here.
+#
+#   qsub -l walltime=2:00:00 -v MODEL_LABEL=nilechat,MODEL_PATH=Henry236/nilechat-eg-lora-chunk-llama,\
+#EOT_TOKEN='<end_of_turn>',VARIANT=chunk-llama,LATENCY=high \
+#       east_scripts/jobs/submit_eval_alldomains.pbs
+#
+#   qsub -l walltime=2:00:00 -v MODEL_LABEL=nilechat,MODEL_PATH=Henry236/nilechat-eg-lora-turn,\
+#EOT_TOKEN='<end_of_turn>',VARIANT=turn,LATENCY=low \
+#       east_scripts/jobs/submit_eval_alldomains.pbs
+#
+#   qsub -l walltime=2:00:00 -v MODEL_LABEL=east8b,MODEL_PATH=Henry236/east8b-eg-lora-chunk-gemma,\
+#EOT_TOKEN='<|eot_id|>',VARIANT=chunk-gemma,LATENCY=medium-high \
+#       east_scripts/jobs/submit_eval_alldomains.pbs
+#
+# Add MAX_EXAMPLES=20 for a smoke test before the full run.
+#PBS -l select=1:ncpus=8:mem=64gb:ngpus=1
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -N east-eval-alldomains
+
+cd "$PBS_O_WORKDIR"
+set -e
+
+module load python/3.11.3
+python3 -m venv "$TMPDIR/east-venv"
+source "$TMPDIR/east-venv/bin/activate"
+source east_scripts/env.sh
+bash east_scripts/setup_katana_env.sh
+
+if [ -z "$HF_TOKEN" ] && [ -f "$HOME/.hf_token" ]; then
+    HF_TOKEN=$(cat "$HOME/.hf_token")
+    export HF_TOKEN
+fi
+: "${HF_TOKEN:?Set HF_TOKEN via ~/.hf_token (see header comment)}"
+: "${MODEL_LABEL:?Set MODEL_LABEL=east8b|nilechat via qsub -v}"
+: "${MODEL_PATH:?Set MODEL_PATH (local path or HF Hub repo id) via qsub -v}"
+: "${EOT_TOKEN:?Set EOT_TOKEN via qsub -v (<|eot_id|> for east8b, <end_of_turn> for nilechat)}"
+: "${VARIANT:?Set VARIANT via qsub -v (used only to name the output dir)}"
+: "${LATENCY:?Set LATENCY=low|low-medium|medium|medium-high|high via qsub -v}"
+
+DATA_PATH="${DATA_PATH:-data/mt_data/test_data/alexandria.test.eg.all_domains.en2ar.json}"
+: "${DATA_PATH:?}"
+[ -f "$DATA_PATH" ] || { echo "ERROR: $DATA_PATH not found -- build it first with: python east_scripts/data/prepare_alexandria_test_data.py --domain \"\" --direction en2ar" >&2; exit 1; }
+
+OUTPUT_DIR="results/granularity_comparison_alldomains/${MODEL_LABEL}/${VARIANT}/${LATENCY}"
+
+MAX_EXAMPLES_ARGS=""
+if [ -n "${MAX_EXAMPLES:-}" ]; then
+    MAX_EXAMPLES_ARGS="--max_examples ${MAX_EXAMPLES}"
+    echo "=== SMOKE TEST: capping to --max_examples ${MAX_EXAMPLES} ==="
+fi
+
+echo "=== nvidia-smi (confirm a GPU is visible before this eats walltime) ==="
+nvidia-smi || echo "WARNING: nvidia-smi failed -- job may not actually have a GPU despite ngpus=1"
+
+COMET_CKPT=$(python -c "from comet import download_model; print(download_model('Unbabel/wmt22-comet-da'))")
+
+echo "=== Eval: MODEL_LABEL=${MODEL_LABEL} VARIANT=${VARIANT} LATENCY=${LATENCY} DATA_PATH=${DATA_PATH} ==="
+python ./east_scripts/eval/simuleval_standalone.py \
+    --model_path "${MODEL_PATH}" \
+    --data_path "${DATA_PATH}" \
+    --output_dir "${OUTPUT_DIR}" \
+    --max_new_tokens 256 \
+    --latency "${LATENCY}" \
+    --num_beams 5 \
+    --eot_token "${EOT_TOKEN}" \
+    --comet_ckpt_path "${COMET_CKPT}" ${MAX_EXAMPLES_ARGS}
+
+echo "Done. Results in ${OUTPUT_DIR}/{prediction,results}.json"

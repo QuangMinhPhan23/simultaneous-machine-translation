@@ -1,0 +1,61 @@
+#!/bin/bash
+# PBS job that generates 3-granularity (low/medium/high) semantic chunks and
+# builds the matching training data. Writes to "-3lat" paths.
+# HF_TOKEN is read from ~/.hf_token; never hardcode it in this file.
+#
+# Smoke test first (MAX_EXAMPLES writes to a separate "-3lat-smoke" path):
+#   qsub -v CHUNKER=nilechat,MAX_EXAMPLES=20 east_scripts/jobs/submit_chunkgen_3lat.pbs
+#
+# Full run (CHUNKER=llama|gemma|nilechat):
+#   qsub -v CHUNKER=llama east_scripts/jobs/submit_chunkgen_3lat.pbs
+#
+# EXTRA_ARGS is passed straight to generate_semantic_chunks.py:
+#   qsub -v CHUNKER=llama,MAX_EXAMPLES=5,EXTRA_ARGS="--debug_raw_responses 3" \
+#       east_scripts/jobs/submit_chunkgen_3lat.pbs
+#
+# Check `qstat -u $USER` first: two jobs writing the same CHUNKS_FILE corrupt it.
+#PBS -l select=1:ncpus=8:mem=64gb:ngpus=1
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -N east-chunkgen-3lat
+
+cd "$PBS_O_WORKDIR"
+set -e
+
+module load python/3.11.3
+python3 -m venv "$TMPDIR/east-venv"
+source "$TMPDIR/east-venv/bin/activate"
+source east_scripts/env.sh
+bash east_scripts/setup_katana_env.sh
+
+if [ -z "$HF_TOKEN" ] && [ -f "$HOME/.hf_token" ]; then
+    HF_TOKEN=$(cat "$HOME/.hf_token")
+    export HF_TOKEN
+fi
+: "${HF_TOKEN:?Set HF_TOKEN via ~/.hf_token (see submit_full_cascade.pbs header) -- qsub -v does not pass it through on this cluster. Needed to read gated repos (Llama-3-8B-Instruct, Gemma-3), not just to push.}"
+: "${CHUNKER:?Set CHUNKER=llama|gemma|nilechat via qsub -v}"
+MAX_EXAMPLES=${MAX_EXAMPLES:-}
+EXTRA_ARGS=${EXTRA_ARGS:-}
+
+SUFFIX="-3lat"
+MAX_EXAMPLES_ARGS=""
+if [ -n "$MAX_EXAMPLES" ]; then
+    SUFFIX="-3lat-smoke"
+    MAX_EXAMPLES_ARGS="--max_examples ${MAX_EXAMPLES}"
+fi
+
+CHUNKS_FILE="data/mt_data/train_data/chunks-${CHUNKER}${SUFFIX}.json"
+DATA_FILE="data/mt_data/train_data/Arabic-EG-SiMT-OMT-chunk-${CHUNKER}${SUFFIX}.json"
+
+# Resume only if this script's own output already exists, e.g. after a job hit its walltime.
+RESUME_FLAG=""
+if [ -f "$CHUNKS_FILE" ]; then
+    echo "Found existing ${CHUNKS_FILE} from a prior run of this script -- resuming."
+    RESUME_FLAG="--resume"
+fi
+
+echo "=== Generating 3-granularity semantic chunks: CHUNKER=${CHUNKER} MAX_EXAMPLES=${MAX_EXAMPLES:-<full run>} EXTRA_ARGS=${EXTRA_ARGS:-<none>} -> ${CHUNKS_FILE} ==="
+time python ./east_scripts/data/generate_semantic_chunks.py --chunker_model "${CHUNKER}" --output "${CHUNKS_FILE}" ${RESUME_FLAG} ${MAX_EXAMPLES_ARGS} ${EXTRA_ARGS}
+python ./east_scripts/data/build_arabic_simt_sft_data.py --chunks_path "${CHUNKS_FILE}" --output "${DATA_FILE}"
+
+echo "Done. Files: ${CHUNKS_FILE}, ${DATA_FILE}"

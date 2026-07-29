@@ -1,0 +1,109 @@
+#!/bin/bash
+# Word-order study, Step 3: chunk generation + SFT build for ONE (LANGUAGE, METHOD) on Katana.
+# Runs generate_chunks.py --backend llama (Llama-3-8B-Instruct chunker) then build_simt_sft.py.
+#
+# Submit FROM THE REPO ROOT (the dir with east_scripts/ and word_order_study/). Put walltime + gpu_model
+# on the qsub COMMAND LINE. A full 3000-pair run is ~3-4 h, so use walltime 6:00:00 for the real run and
+# 2:00:00 for a 20-pair smoke. --resume (added automatically when a chunks file already exists) makes a
+# timed-out job safe to just re-submit. Do NOT run two jobs for the same (LANGUAGE, METHOD) at once.
+#
+#   Smoke (20 pairs):
+#   qsub -l walltime=2:00:00 -l select=1:ncpus=8:mem=64gb:ngpus=1:gpu_model=H200 -v LANGUAGE=korean,METHOD=generic,MAX_EXAMPLES=20 word_order_study/submit_chunkgen.pbs
+#   Real run:
+#   qsub -l walltime=6:00:00 -l select=1:ncpus=8:mem=64gb:ngpus=1:gpu_model=H200 -v LANGUAGE=korean,METHOD=generic word_order_study/submit_chunkgen.pbs
+#   All 10 jobs (5 langs x 2 methods):
+#   for L in vietnamese msa korean saudi egyptian; do for M in generic specific; do qsub -l walltime=6:00:00 -l select=1:ncpus=8:mem=64gb:ngpus=1:gpu_model=H200 -v LANGUAGE=$L,METHOD=$M word_order_study/submit_chunkgen.pbs; done; done
+#PBS -l select=1:ncpus=8:mem=64gb:ngpus=1:gpu_model=H200
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -N wo-chunkgen
+
+cd "$PBS_O_WORKDIR"
+set -e
+
+# Work from the repo root whether qsub was run there or from inside word_order_study/.
+if [ ! -f east_scripts/env.sh ] && [ -f ../east_scripts/env.sh ]; then cd ..; fi
+[ -f east_scripts/env.sh ] || { echo "ERROR: submit from the EAST repo root (contains east_scripts/ and word_order_study/). PWD=$(pwd)" >&2; exit 1; }
+echo "Working dir: $(pwd)"
+
+module load python/3.11.3
+python3 -m venv "$TMPDIR/east-venv"
+source "$TMPDIR/east-venv/bin/activate"
+source east_scripts/env.sh
+bash east_scripts/setup_katana_env.sh
+
+if [ -z "${HF_TOKEN:-}" ] && [ -f "$HOME/.hf_token" ]; then
+    HF_TOKEN=$(cat "$HOME/.hf_token"); export HF_TOKEN
+fi
+: "${HF_TOKEN:?Llama-3-8B-Instruct is gated -- set HF_TOKEN via ~/.hf_token (qsub -v does not pass it through on this cluster)}"
+: "${LANGUAGE:?Set LANGUAGE=vietnamese|msa|korean|saudi|egyptian via qsub -v}"
+: "${METHOD:?Set METHOD=generic|specific via qsub -v}"
+MAX_EXAMPLES=${MAX_EXAMPLES:-}
+RETRY=${RETRY:-}
+RETRY_SAMPLES=${RETRY_SAMPLES:-3}
+
+export EAST_CACHE="${EAST_CACHE:-$TMPDIR/east_cache}"
+mkdir -p "$EAST_CACHE/huggingface"
+export HF_HOME="$EAST_CACHE/huggingface"
+export HF_HUB_CACHE="$EAST_CACHE/huggingface/hub"
+
+echo "=== nvidia-smi (confirm a GPU before this eats walltime) ==="
+nvidia-smi || echo "WARNING: no GPU visible despite ngpus=1"
+
+SUFFIX=""
+MAX_ARGS=""
+if [ -n "$MAX_EXAMPLES" ]; then
+    SUFFIX="-smoke"
+    MAX_ARGS="--max_examples ${MAX_EXAMPLES}"
+fi
+
+DIR="word_order_study/data/${LANGUAGE}"
+CHUNKS="${DIR}/chunks-${METHOD}${SUFFIX}.json"
+DATAOUT="${DIR}/simt-${METHOD}${SUFFIX}.train.json"
+
+# RETRY mode (second pass): re-chunk only the fallback (idx,latency) pairs in the FULL chunks file using
+# single-latency sampling + best-of-N, write to a *-retry.json, and (full runs) rebuild the SFT from it.
+# MAX_EXAMPLES here caps how many fallback ENTRIES to retry (smoke). Reads chunks-<method>.json (never the
+# -smoke input). Submit e.g.:  -v LANGUAGE=korean,METHOD=generic,RETRY=1,MAX_EXAMPLES=20   (smoke)
+#                               -v LANGUAGE=korean,METHOD=generic,RETRY=1                    (full)
+if [ -n "$RETRY" ]; then
+    RCHUNKS="${DIR}/chunks-${METHOD}.json"                 # retry always operates on the FULL file
+    RSUF=""; [ -n "$MAX_EXAMPLES" ] && RSUF="-smoke"
+    RETRY_OUT="${DIR}/chunks-${METHOD}-retry${RSUF}.json"
+    RETRY_DATAOUT="${DIR}/simt-${METHOD}-retry.train.json"
+    [ -f "$RCHUNKS" ] || { echo "ERROR: ${RCHUNKS} not found (run the base chunk-gen first)" >&2; exit 1; }
+    echo "=== Step 3 RETRY: re-chunk fallbacks in ${RCHUNKS} -> ${RETRY_OUT} (samples=${RETRY_SAMPLES}, cap=${MAX_EXAMPLES:-all}) ==="
+    time python word_order_study/generate_chunks.py \
+        --language "${LANGUAGE}" --method "${METHOD}" --backend llama \
+        --output "${RCHUNKS}" --retry_fallbacks --retry_output "${RETRY_OUT}" \
+        --retry_samples "${RETRY_SAMPLES}" ${MAX_ARGS}
+    if [ -z "$MAX_EXAMPLES" ]; then
+        echo "=== Step 3 RETRY: SFT build -> ${RETRY_DATAOUT} ==="
+        python word_order_study/build_simt_sft.py \
+            --language "${LANGUAGE}" --method "${METHOD}" --chunks_path "${RETRY_OUT}" \
+            --output "${RETRY_DATAOUT}"
+    fi
+    echo "DONE. Files: ${RETRY_OUT}"
+    exit 0
+fi
+
+# Resume only a FULL run (not a smoke) against its OWN prior chunks file: keeps good entries, retries
+# fallbacks. Safe against a walltime timeout -- just re-submit the identical qsub.
+RESUME_FLAG=""
+if [ -z "$MAX_EXAMPLES" ] && [ -f "$CHUNKS" ]; then
+    echo "Found existing ${CHUNKS} -- resuming (keep good entries, retry fallbacks)."
+    RESUME_FLAG="--resume"
+fi
+
+echo "=== Step 3: chunk gen  LANGUAGE=${LANGUAGE} METHOD=${METHOD} MAX=${MAX_EXAMPLES:-<full>} -> ${CHUNKS} ==="
+time python word_order_study/generate_chunks.py \
+    --language "${LANGUAGE}" --method "${METHOD}" --backend llama \
+    --output "${CHUNKS}" ${MAX_ARGS} ${RESUME_FLAG}
+
+echo "=== Step 3: SFT build -> ${DATAOUT} ==="
+python word_order_study/build_simt_sft.py \
+    --language "${LANGUAGE}" --method "${METHOD}" --chunks_path "${CHUNKS}" \
+    --output "${DATAOUT}" ${MAX_ARGS}
+
+echo "DONE. Files: ${CHUNKS}, ${DATAOUT}"
+echo "NEXT: verify the fallback rate printed above AND spot-check ${DATAOUT} before training."

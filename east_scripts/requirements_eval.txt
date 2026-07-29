@@ -1,0 +1,49 @@
+# Minimal dependencies for east_scripts/eval/simuleval_standalone.py,
+# east_scripts/finetune_arabic_standalone.py,
+# east_scripts/finetune_nilechat_standalone.py, and the DPO staged
+# fine-tuning pipeline (east_scripts/train/train_dpo_standalone.py + build_dpo_stage*.py).
+# Deliberately NOT the repo's top-level requirements.txt: that file is the
+# original authors' full training environment (TensorFlow, Ray, vLLM, WandB,
+# flash-attn's CUDA build, ~250 pinned packages frozen for Python <=3.11) and
+# is unnecessary just to load a checkpoint and run inference/LoRA fine-tuning.
+#
+# torch is deliberately NOT listed here -- install it separately first with
+# `--index-url https://download.pytorch.org/whl/cu126` (see setup_katana_env.sh).
+# Katana GPU nodes vary by job (we've seen V100, A100, and L40S across
+# different sessions); PyTorch >=2.11's default CUDA 12.8/12.9 wheels dropped
+# Volta (V100, compute capability 7.0) support, while the cu126 build still
+# carries it and remains compatible with Ampere/Ada (A100/L40S) too. Mixing
+# that index into this file via --extra-index-url is unreliable -- pip can
+# still resolve the ambiguous "torch" package name from default PyPI instead
+# of the pinned index -- so it's installed as its own explicit step instead.
+# >=4.51.0 for Gemma-3 support (needed by MBZUAI-Paris/Nile-Chat-4B in
+# offline_translate_eval.py); Llama-3/EAST-8B remains compatible at this
+# version -- re-run the EAST-8B sanity check in run_offline_llm_comparison.sh
+# notes if bumping further.
+transformers>=4.51.0
+accelerate>=0.30.0
+peft>=0.11.0
+# Needed for finetune_nilechat_standalone.py's paged 8-bit AdamW optimizer --
+# full-parameter fine-tuning of even a 4B model needs ~64GB naively (weights +
+# gradients + fp32 optimizer states + fp32 master weights), which doesn't fit
+# any Katana GPU seen in this project; paged 8-bit Adam quantizes optimizer
+# states and pages them to CPU RAM under memory pressure instead of OOMing.
+bitsandbytes
+sentencepiece
+protobuf
+huggingface_hub
+sacrebleu==2.4.2
+unbabel-comet==2.2.6
+# BERTScore (F1 with multilingual BERT) -- reported by simuleval_standalone.py
+# alongside BLEU/spBLEU/chrF++/COMET so every eval is comprehensive in one pass.
+# Import name is `bert_score`; disable per-run with --bertscore_model "".
+bert-score
+# For train_dpo_standalone.py only. A floor, not a ceiling: trl==0.12.x was
+# tried first and crashes against transformers>=4.51's Trainer.log(logs,
+# start_time) signature with "DPOTrainer.log() takes 2 positional arguments
+# but 3 were given" -- trl 0.12's DPOTrainer.log() override predates that
+# transformers change. >=0.15 has a matching log() override. If a future
+# transformers bump breaks this pairing again, the fix is the same: `pip
+# install -U trl` to pick up trl's corresponding fix, not pin transformers down.
+trl>=0.15
+sentence_transformers

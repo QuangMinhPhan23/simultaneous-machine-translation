@@ -1,0 +1,110 @@
+#!/bin/bash
+# Train-only PBS job for the register-filtered Nile-Chat Stage II leg. It
+# rebuilds the training data from the baseline's chunk file, so the register
+# filter is the only difference, runs LoRA Stage II, and pushes the checkpoint
+# to the HF Hub. Eval is a separate job: run submit_eval_alldomains.pbs with the
+# commands this job prints at the end.
+#
+# HF_TOKEN is read from ~/.hf_token; never hardcode it in this file.
+# Always set walltime and gpu_model=H200 on the qsub command line: the in-file
+# #PBS walltime is not reliably honored here.
+#
+#   # 1) smoke test with 32 examples:
+#   qsub -l walltime=2:00:00 -l select=1:ncpus=8:mem=64gb:ngpus=1:gpu_model=H200 \
+#        -v NILECHAT_STAGE1_MODEL=<your-stage1-ckpt-or-HF-repo>,\
+#CHUNKS_PATH=data/mt_data/train_data/chunks-llama.json,MAX_EXAMPLES=32 \
+#        east_scripts/jobs/submit_regfilt_train.pbs
+#
+#   # 2) real run (drop MAX_EXAMPLES):
+#   qsub -l walltime=12:00:00 -l select=1:ncpus=8:mem=64gb:ngpus=1:gpu_model=H200 \
+#        -v NILECHAT_STAGE1_MODEL=<your-stage1-ckpt-or-HF-repo>,\
+#CHUNKS_PATH=data/mt_data/train_data/chunks-llama.json \
+#        east_scripts/jobs/submit_regfilt_train.pbs
+#
+# Required -v: NILECHAT_STAGE1_MODEL (local path or HF repo id),
+#              CHUNKS_PATH (the same chunks-*.json the baseline leg used).
+# Optional -v: VARIANT (default chunk-llama-regfilt; only names outputs),
+#              MIN_DIALECTNESS (default 0.4), REGISTER_MIN_WORDS (default 6),
+#              MAX_EXAMPLES (smoke test), HF_REPO_PREFIX (default Henry236).
+#PBS -l select=1:ncpus=8:mem=64gb:ngpus=1:gpu_model=H200
+#PBS -l walltime=12:00:00
+#PBS -j oe
+#PBS -N east-regfilt-train
+
+cd "$PBS_O_WORKDIR"
+set -e
+
+module load python/3.11.3
+python3 -m venv "$TMPDIR/east-venv"
+source "$TMPDIR/east-venv/bin/activate"
+source east_scripts/env.sh
+bash east_scripts/setup_katana_env.sh
+
+if [ -z "${HF_TOKEN:-}" ] && [ -f "$HOME/.hf_token" ]; then
+    HF_TOKEN=$(cat "$HOME/.hf_token"); export HF_TOKEN
+fi
+: "${HF_TOKEN:?Set HF_TOKEN via ~/.hf_token (see submit_eval_alldomains.pbs header)}"
+: "${NILECHAT_STAGE1_MODEL:?Set NILECHAT_STAGE1_MODEL via qsub -v (Stage I ckpt path or HF repo)}"
+: "${CHUNKS_PATH:?Set CHUNKS_PATH via qsub -v (the SAME chunks-*.json the baseline leg used)}"
+
+VARIANT="${VARIANT:-chunk-llama-regfilt}"
+MIN_DIALECTNESS="${MIN_DIALECTNESS:-0.4}"
+REGISTER_MIN_WORDS="${REGISTER_MIN_WORDS:-6}"
+HF_REPO_PREFIX="${HF_REPO_PREFIX:-Henry236}"
+
+export EAST_CACHE=${EAST_CACHE:-${TMPDIR:-/scratch/$USER}/east_cache}
+mkdir -p "$EAST_CACHE/huggingface" "$EAST_CACHE/torch"
+export HF_HOME="$EAST_CACHE/huggingface"
+export HF_HUB_CACHE="$EAST_CACHE/huggingface/hub"
+export TORCH_HOME="$EAST_CACHE/torch"
+
+[ -f "$CHUNKS_PATH" ] || { echo "ERROR: CHUNKS_PATH=$CHUNKS_PATH not found -- point it at the chunks-*.json your baseline leg used" >&2; exit 1; }
+
+echo "=== nvidia-smi (confirm a GPU is visible before this eats walltime) ==="
+nvidia-smi || echo "WARNING: nvidia-smi failed -- job may not actually have a GPU despite ngpus=1"
+
+DATA_FILE="data/mt_data/train_data/Arabic-EG-SiMT-OMT-${VARIANT}.json"
+STAGE2_EXTRA_ARGS=""
+if [ -n "${MAX_EXAMPLES:-}" ]; then
+    echo "=== SMOKE TEST: capping to --max_examples ${MAX_EXAMPLES}, 1 epoch; HF push disabled ==="
+    STAGE2_EXTRA_ARGS="--max_examples ${MAX_EXAMPLES} --num_train_epochs 1"
+    DATA_FILE="${DATA_FILE%.json}-smoke.json"
+fi
+
+# 1) Build the register-filtered training data. Skipped if it already exists,
+#    so two jobs cannot race on the same file. Delete it to force a rebuild.
+if [ ! -f "$DATA_FILE" ]; then
+    echo "=== Building $DATA_FILE (ALDi>=$MIN_DIALECTNESS, length-gate $REGISTER_MIN_WORDS words) ==="
+    python ./east_scripts/data/build_arabic_simt_sft_data.py \
+        --country EG --split train --direction en2ar \
+        --chunks_path "$CHUNKS_PATH" \
+        --register_filter aldi --min_dialectness "$MIN_DIALECTNESS" --register_min_words "$REGISTER_MIN_WORDS" \
+        --output "$DATA_FILE"
+else
+    echo "=== $DATA_FILE already exists -- reusing (delete it to force a rebuild) ==="
+fi
+
+# 2) LoRA Stage II on the Stage I checkpoint. Push to HF so a later eval job can
+#    load it by repo id, since this job's $TMPDIR will be gone by then.
+FT_OUTPUT_DIR="${EAST_CACHE}/nilechat-eg-lora-${VARIANT}"
+if [ -z "${MAX_EXAMPLES:-}" ]; then
+    export HF_REPO_ID="${HF_REPO_PREFIX}/nilechat-eg-lora-${VARIANT}"
+    echo "=== Stage II -> will push to HF repo ${HF_REPO_ID} ==="
+else
+    unset HF_REPO_ID
+fi
+
+python ./east_scripts/train/finetune_lora_stage2.py \
+    --model_path "${NILECHAT_STAGE1_MODEL}" \
+    --eot_token "<end_of_turn>" \
+    --data_path "${DATA_FILE}" \
+    --output_dir "${FT_OUTPUT_DIR}" ${STAGE2_EXTRA_ARGS}
+
+echo ""
+echo "=== DONE. Next: 5-latency all-domain eval via the proven eval job ==="
+echo "for L in low low-medium medium medium-high high; do"
+echo "  qsub -l walltime=2:00:00 -l select=1:ncpus=8:mem=64gb:ngpus=1:gpu_model=H200 \\"
+echo "    -v MODEL_LABEL=nilechat,MODEL_PATH=${HF_REPO_PREFIX}/nilechat-eg-lora-${VARIANT},\\"
+echo "EOT_TOKEN='<end_of_turn>',VARIANT=${VARIANT},LATENCY=\$L \\"
+echo "    east_scripts/jobs/submit_eval_alldomains.pbs"
+echo "done"

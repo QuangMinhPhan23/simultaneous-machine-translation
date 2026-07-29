@@ -1,0 +1,78 @@
+#!/bin/bash
+# PBS wrapper around run_full_cascade_comparison.sh, split into phases that
+# each fit inside one job. Run submit_full_cascade_jobs.sh to submit the whole
+# dependency chain at once, or submit a single phase by hand as shown below.
+#
+# HF_TOKEN is read from ~/.hf_token; never hardcode it in this file. Write it once:
+#
+#   umask 077 && read -s -p "HF token: " tok && echo "$tok" > ~/.hf_token && unset tok
+#
+# Chunk generation (3 independent jobs):
+#   qsub -v PHASE=chunkgen,CHUNKER=llama    east_scripts/jobs/submit_full_cascade.pbs
+#   qsub -v PHASE=chunkgen,CHUNKER=gemma    east_scripts/jobs/submit_full_cascade.pbs
+#   qsub -v PHASE=chunkgen,CHUNKER=nilechat east_scripts/jobs/submit_full_cascade.pbs
+#
+# Nile-Chat Stage I (can run at the same time as chunk generation):
+#   qsub -v PHASE=stage1,HF_REPO_PREFIX=Henry236 east_scripts/jobs/submit_full_cascade.pbs
+#
+# Stage II, one job per (MODEL_LABEL, VARIANT). A nilechat job needs the repo id
+# the stage1 job printed:
+#   qsub -v PHASE=stage2,MODEL_LABEL=east8b,VARIANT=heuristic \
+#       east_scripts/jobs/submit_full_cascade.pbs
+#   qsub -v PHASE=stage2,MODEL_LABEL=nilechat,VARIANT=chunk-llama,NILECHAT_STAGE1_MODEL_OVERRIDE=Henry236/nilechat-eg-stage1-general \
+#       east_scripts/jobs/submit_full_cascade.pbs
+#PBS -l select=1:ncpus=8:mem=64gb:ngpus=1
+#PBS -l walltime=10:00:00
+#PBS -j oe
+#PBS -N east-granularity-cascade
+
+cd "$PBS_O_WORKDIR"
+set -e
+
+# --- Environment setup ---
+# Rebuilt every job, because $TMPDIR is node-local and wiped when the job ends,
+# so each phase also re-downloads its own base model.
+module load python/3.11.3
+python3 -m venv "$TMPDIR/east-venv"
+source "$TMPDIR/east-venv/bin/activate"
+source east_scripts/env.sh
+bash east_scripts/setup_katana_env.sh
+
+# --- Check the env vars arrived ---
+if [ -z "$HF_TOKEN" ] && [ -f "$HOME/.hf_token" ]; then
+    HF_TOKEN=$(cat "$HOME/.hf_token")
+    export HF_TOKEN
+fi
+: "${HF_TOKEN:?Set HF_TOKEN via ~/.hf_token (see header comment) -- qsub -v does not pass it through on this cluster}"
+: "${PHASE:?Set PHASE=chunkgen|stage1|stage2 via qsub -v (see header comment for the exact commands)}"
+
+export HF_REPO_PREFIX="${HF_REPO_PREFIX:-Henry236}"
+
+case "$PHASE" in
+    chunkgen)
+        : "${CHUNKER:?PHASE=chunkgen requires CHUNKER=llama|gemma|nilechat via qsub -v}"
+        echo "=== PHASE=chunkgen CHUNKER=${CHUNKER} ==="
+        CHUNKERS="$CHUNKER" RUN_STAGE1=0 RUN_STAGE2=0 bash east_scripts/jobs/run_full_cascade_comparison.sh
+        ;;
+    stage1)
+        echo "=== PHASE=stage1 ==="
+        RUN_DATA_BUILD=0 RUN_STAGE2=0 bash east_scripts/jobs/run_full_cascade_comparison.sh
+        echo "Stage I checkpoint pushed to https://huggingface.co/${HF_REPO_PREFIX}/nilechat-eg-stage1-general"
+        echo "Pass NILECHAT_STAGE1_MODEL_OVERRIDE=${HF_REPO_PREFIX}/nilechat-eg-stage1-general to every PHASE=stage2 MODEL_LABEL=nilechat job."
+        ;;
+    stage2)
+        : "${MODEL_LABEL:?PHASE=stage2 requires MODEL_LABEL=east8b|nilechat via qsub -v}"
+        : "${VARIANT:?PHASE=stage2 requires VARIANT=heuristic|turn|chunk-llama|chunk-gemma|chunk-nilechat via qsub -v}"
+        if [ "$MODEL_LABEL" = "nilechat" ]; then
+            : "${NILECHAT_STAGE1_MODEL_OVERRIDE:?PHASE=stage2 MODEL_LABEL=nilechat requires NILECHAT_STAGE1_MODEL_OVERRIDE (the repo id printed by the PHASE=stage1 job) via qsub -v}"
+        fi
+        echo "=== PHASE=stage2 MODEL_LABEL=${MODEL_LABEL} VARIANT=${VARIANT} ==="
+        RUN_DATA_BUILD=0 RUN_STAGE1=0 ONLY_MODEL="$MODEL_LABEL" VARIANTS="$VARIANT" \
+            NILECHAT_STAGE1_MODEL_OVERRIDE="${NILECHAT_STAGE1_MODEL_OVERRIDE:-}" \
+            bash east_scripts/jobs/run_full_cascade_comparison.sh
+        ;;
+    *)
+        echo "Unknown PHASE=${PHASE} (expected chunkgen, stage1, or stage2)" >&2
+        exit 1
+        ;;
+esac
