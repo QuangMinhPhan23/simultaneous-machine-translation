@@ -30,6 +30,8 @@ from datasets import load_dataset
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT_ROOT = os.path.join(HERE, "data")
 
+# Length band for the English side, and how far a pair's target/source character ratio may sit from
+# the language median before it is treated as a misaligned pair and dropped.
 MIN_WORDS, MAX_WORDS = 15, 30
 RATIO_LO_FACTOR, RATIO_HI_FACTOR = 1 / 3, 3.0
 
@@ -42,6 +44,8 @@ MATTR_WINDOW = 100
 FLAT_TARGETS = (2400, 300, 300)
 ALEX_TARGETS = (3000, 500, 500)
 
+# Per-language config. "kind" picks the extraction path: "flat" datasets are one pool of sentence
+# pairs, "alexandria" rows are conversations with their own splits. "ext" is the target file suffix.
 LANGS = {
     "vietnamese": {"kind": "flat", "hf": "thainq107/iwslt2015-en-vi",
                    "en_col": "en", "tgt_col": "vi", "ext": "vi",
@@ -60,6 +64,7 @@ LANGS = {
 
 
 def norm_en(s):
+    """Lowercase and collapse whitespace. This is the key used for deduplication."""
     return " ".join(s.lower().split())
 
 
@@ -68,6 +73,7 @@ def n_words(s):
 
 
 def in_band(en):
+    """True if the English sentence is inside the 15-30 word length band."""
     return MIN_WORDS <= n_words(en) <= MAX_WORDS
 
 
@@ -86,17 +92,23 @@ def dedup(pairs, seen=None):
 
 
 def ratio_bounds(pairs):
+    """Find this language's typical target/source character ratio.
+
+    Returns (lo, hi, median): the keep window and the median it was derived from. The median is
+    used instead of the mean so a few badly misaligned pairs cannot drag the window around."""
     ratios = [len(p["tgt"]) / max(1, len(p["en"])) for p in pairs]
     med = statistics.median(ratios)
     return med * RATIO_LO_FACTOR, med * RATIO_HI_FACTOR, med
 
 
 def apply_ratio(pairs, lo, hi):
+    """Keep only the pairs whose target/source character ratio falls inside [lo, hi]."""
     return [p for p in pairs if lo <= len(p["tgt"]) / max(1, len(p["en"])) <= hi]
 
 
 def stratified(items, n, rng):
     """Balanced-as-possible sample of size n across item['domain']; fills to n if avail>=n."""
+    # Group by domain and shuffle inside each group, then take an equal share from every domain.
     buckets = defaultdict(list)
     for it in items:
         buckets[it.get("domain", "_")].append(it)
@@ -109,6 +121,7 @@ def stratified(items, n, rng):
         take = min(base, len(buckets[k]))
         chosen += buckets[k][:take]
         leftover += buckets[k][take:]
+    # Small domains run out before their full share, so top up from everything not taken yet.
     rng.shuffle(leftover)
     chosen += leftover[: max(0, n - len(chosen))]
     rng.shuffle(chosen)
@@ -118,6 +131,9 @@ def stratified(items, n, rng):
 # ---------------------------------------------------------------- extraction
 
 def extract_flat(cfg):
+    """Load a plain sentence-pair dataset from the Hub and keep the pairs where both sides exist.
+
+    These datasets give one big train split, which build_language() later cuts into train/dev/test."""
     ds = load_dataset(cfg["hf"])
     rows = ds["train"]
     en_c, tgt_c = cfg["en_col"], cfg["tgt_col"]
@@ -131,6 +147,11 @@ def extract_flat(cfg):
 
 
 def extract_alexandria(cfg):
+    """Load the Alexandria dialect data for one country and flatten it into sentence pairs.
+
+    Each row is a whole conversation, so the English and dialectal turn lists are zipped turn by
+    turn. The dataset's own train/dev/test splits are kept, and each pair carries its domain label
+    so the splits can be sampled evenly across domains later."""
     ds = load_dataset("UBC-NLP/alexandria", name=cfg["country"])
     out = {}
     split_map = {"train": "train", "dev": "dev", "test": "test"}
@@ -148,10 +169,15 @@ def extract_alexandria(cfg):
 # ---------------------------------------------------------------- per-language build
 
 def build_language(name, cfg, rng, report):
+    """Run the whole cleaning pipeline for one language and write its six parallel files.
+
+    Appends one stats row per split to `report` and returns the three splits."""
     print(f"\n########## {name} ({cfg['order']}) ##########")
     t_tr, t_dev, t_te = cfg["targets"]
 
     if cfg["kind"] == "flat":
+        # Step 1a (flat datasets): clean the single pool - length band, dedup, ratio filter - then
+        # shuffle and cut three disjoint slices out of it, so no sentence appears in two splits.
         raw = extract_flat(cfg)["train"]
         band = [p for p in raw if in_band(p["en"])]
         deduped, _ = dedup(band)
@@ -169,6 +195,8 @@ def build_language(name, cfg, rng, report):
         print(f"  raw={len(raw)}  in[15,30]={len(band)}  deduped={len(deduped)}  "
               f"ratio-med={med:.2f} keep=[{lo:.2f},{hi:.2f}]  clean={len(clean)}")
     else:  # alexandria
+        # Step 1b (Alexandria): the splits already exist, so clean train first and reuse both its
+        # ratio window and its set of English keys when cleaning dev and test.
         raw = extract_alexandria(cfg)
         # word-filter + dedup train first, then dev/test excluding train's English keys
         tr_band = [p for p in raw["train"] if in_band(p["en"])]
@@ -183,6 +211,7 @@ def build_language(name, cfg, rng, report):
 
         dev_clean = prep_eval("dev")
         te_clean = prep_eval("test")
+        # Sample each split evenly across domains rather than taking the first N.
         splits = {
             "train": stratified(tr_clean, t_tr, rng),
             "dev": stratified(dev_clean, t_dev, rng),
@@ -195,7 +224,8 @@ def build_language(name, cfg, rng, report):
               f"dev clean={len(dev_clean)} | test clean={len(te_clean)}  "
               f"ratio-med={med:.2f} keep=[{lo:.2f},{hi:.2f}]")
 
-    # write files
+    # Step 2: write one file per split and side, and collect the stats row for each split. The two
+    # files of a split stay line-aligned: line i of .en is the source for line i of the target file.
     out_dir = os.path.join(OUT_ROOT, name)
     os.makedirs(out_dir, exist_ok=True)
     ext = cfg["ext"]
@@ -225,6 +255,8 @@ def mattr(tokens, window=MATTR_WINDOW):
         return 0.0
     if n <= window:
         return len(set(tokens)) / n
+    # Slide the window forward one token at a time: count in the token that enters, count out the
+    # one that leaves, and add the window's current type/token ratio to the running sum.
     counts = Counter(tokens[:window])
     ttr_sum = len(counts) / window
     for i in range(window, n):
@@ -238,6 +270,9 @@ def mattr(tokens, window=MATTR_WINDOW):
 
 
 def split_stats(name, cfg, split, pairs):
+    """Describe one split as a single row for the stats table: how many pairs it has, average
+    sentence lengths in words and characters, and the two lexical-diversity numbers for the
+    target side. Target tokens are whitespace-split and lowercased."""
     if not pairs:
         return {"language": name, "order": cfg["order"], "split": split, "n": 0}
     src_w = [n_words(p["en"]) for p in pairs]
@@ -263,6 +298,7 @@ def split_stats(name, cfg, split, pairs):
 
 
 def write_stats(report):
+    """Write the collected stats rows twice: stats.json for later scripts, stats.md to read."""
     # machine-readable
     with open(os.path.join(OUT_ROOT, "stats.json"), "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
@@ -303,8 +339,10 @@ if __name__ == "__main__":
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
+    # One seeded random generator shared by every language, so re-running gives the same splits.
     rng = random.Random(args.seed)
     os.makedirs(OUT_ROOT, exist_ok=True)
+    # Each language appends its own stats rows to `report`; the table is written once at the end.
     report = []
     for name in args.languages:
         build_language(name, LANGS[name], rng, report)

@@ -36,13 +36,20 @@ def read_lines(path):
 
 
 def heuristic_entry(source, target):
+    """Split both sentences by word count (2 / 4 / 8 words for low / medium / high latency).
+
+    This is the no-model backend, and also what we fall back to whenever the model's answer is bad.
+    Nothing can fail here, so every latency is marked as "not a fallback"."""
     chunks = {lat: chunk_sentence_pair(source, target, w) for lat, w in LATENCY_CHUNK_WORDS.items()}
     return chunks, {lat: False for lat in LATENCY_CHUNK_WORDS}, {lat: None for lat in LATENCY_CHUNK_WORDS}
 
 
 def retry_fallbacks(args, src, tgt):
-    """Second pass: re-chunk only the fallback (idx, latency) pairs in args.output using a single-latency
-    prompt + sampling + best-of-N. Merge successful samples back; leave the rest as heuristic fallback."""
+    """Second pass over an existing chunks file: retry only the sentences that failed.
+
+    The first pass asks for all three latencies in one answer, which is long and easy to get wrong.
+    Here we ask for one latency at a time and sample a few times (best-of-N), which succeeds more
+    often. Anything still failing keeps its word-count split."""
     import torch
     from generate_semantic_chunks import ChunkGenerator
     from chunk_validate import parse_single_latency
@@ -149,6 +156,8 @@ def main():
     ap.add_argument("--output", required=True)
     args = ap.parse_args()
 
+    # Step 1: load the parallel sentences. The two files are line-aligned, so line i of the English
+    # file is the translation of line i of the target file.
     ext = EXT[args.language]
     src = read_lines(os.path.join(DATA, args.language, f"{args.split}.en"))
     tgt = read_lines(os.path.join(DATA, args.language, f"{args.split}.{ext}"))
@@ -157,12 +166,16 @@ def main():
     n = len(src) if args.max_examples is None else min(args.max_examples, len(src))
     tgt_lang = chunk_prompts.TGT_LANG_NAME[args.language]
 
+    # Retry mode is a separate job: it only re-does the sentences that failed in an earlier run.
     if args.retry_fallbacks:
         if not os.path.exists(args.output):
             raise SystemExit(f"--retry_fallbacks needs an existing --output; {args.output} not found")
         retry_fallbacks(args, src, tgt)
         return
 
+    # Step 2: set up the chunker. With --backend heuristic there is no model at all (gen stays None)
+    # and every sentence is split by word count. torch is imported here so the heuristic backend can
+    # run on a laptop without a GPU.
     gen = None
     if args.backend == "llama":
         import torch
@@ -170,11 +183,14 @@ def main():
         from chunk_validate import parse_chunk_response_wo as parse_chunk_response
 
         class _Gen:
+            """Sends one sentence pair to the model and returns the validated chunks."""
+
             def __init__(self, model):
                 self.cg = ChunkGenerator(model, min_similarity=args.min_reconstruction_similarity)
 
             @torch.no_grad()
             def __call__(self, source, target):
+                # Build the prompt, ask the model once, then check the answer rebuilds the sentence.
                 prompt = chunk_prompts.build_prompt(args.method, args.language, source, target)
                 pt = self.cg.tokenizer.apply_chat_template(
                     [{"role": "user", "content": prompt}], tokenize=False, add_generation_prompt=True)
@@ -189,6 +205,8 @@ def main():
         print(f"Loading chunker model: {args.model}")
         gen = _Gen(args.model)
 
+    # Step 3: with --resume, keep the sentences that already chunked cleanly and only redo the
+    # failures. This is what makes a job that hit the walltime limit safe to just submit again.
     entries, done = [], set()
     if args.resume and os.path.exists(args.output):
         with open(args.output, encoding="utf-8") as f:
@@ -198,6 +216,7 @@ def main():
         print(f"Resuming: {len(entries)} good entries kept, "
               f"{len(prev) - len(entries)} fallbacks will be retried", file=sys.stderr)
 
+    # Step 4: chunk the sentences one pair at a time.
     for i in range(n):
         if i in done:
             continue
@@ -210,6 +229,8 @@ def main():
             try:
                 chunks, fbl, rbl = gen(s, t)
             except Exception as e:
+                # If the model call itself crashes, keep going with the word-count split instead of
+                # losing the whole run, and record why.
                 chunks, fbl, rbl = heuristic_entry(s, t)
                 rbl = {lat: f"generation_exception: {e}" for lat in LATENCY_CHUNK_WORDS}
                 fbl = {lat: True for lat in LATENCY_CHUNK_WORDS}
@@ -218,16 +239,20 @@ def main():
             "chunks": {lat: {"source_chunks": sc, "target_chunks": tc} for lat, (sc, tc) in chunks.items()},
             "fallback": any(fbl.values()), "fallback_by_latency": fbl, "fallback_reason_by_latency": rbl,
         })
+        # Save every few hundred sentences, so a job that runs out of walltime still leaves
+        # something usable to resume from.
         if gen is not None and len(entries) % args.save_every == 0:
             with open(args.output, "w", encoding="utf-8") as f:
                 json.dump(entries, f, ensure_ascii=False, indent=2)
             print(f"  ...{i + 1}/{n} processed, {len(entries)} entries so far", file=sys.stderr)
 
+    # Step 5: write the finished chunks file.
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(entries, f, ensure_ascii=False, indent=2)
 
-    # summary over the FULL file (correct across --resume)
+    # Step 6: report how often the model failed and we used the word-count split instead. This
+    # fallback rate is one of the study's results, so it is printed for every run.
     n_fallback = sum(1 for e in entries if e["fallback"])
     fb_by_lat, reasons = Counter(), Counter()
     for e in entries:

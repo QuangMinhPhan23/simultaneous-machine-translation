@@ -18,6 +18,10 @@ LATENCIES = ["low", "medium", "high"]
 
 
 def matched_vs_shuffled(source_chunks, target_chunks, model, rng):
+    """Average cosine similarity of the real chunk pairing, and of a shuffled control pairing.
+
+    The shuffle is a derangement, so no chunk is left paired with its own translation. A real
+    alignment should score clearly higher than the shuffled one."""
     src_emb = model.encode(source_chunks, convert_to_tensor=True, show_progress_bar=False)
     tgt_emb = model.encode(target_chunks, convert_to_tensor=True, show_progress_bar=False)
     sims = util.cos_sim(src_emb, tgt_emb).numpy()
@@ -33,6 +37,10 @@ def matched_vs_shuffled(source_chunks, target_chunks, model, rng):
 
 
 def main():
+    """Run the alignment check separately for LLM-produced chunks and fallback chunks.
+
+    This tells us whether the LLM chunker is actually better aligned than the mechanical
+    word-count backup it falls back to."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--chunks_path", required=True)
     parser.add_argument("--model", default="paraphrase-multilingual-MiniLM-L12-v2")
@@ -47,6 +55,8 @@ def main():
     print(f"Loading {args.model} (first run downloads the model)...")
     model = SentenceTransformer(args.model)
 
+    # Sort every usable chunking into one of six buckets: (llm or fallback) x (low/medium/high).
+    # Entries with fewer than two chunks, or with mismatched counts, cannot be checked.
     groups = {(src, lat): [] for src in ("llm", "fallback") for lat in LATENCIES}
 
     for entry in entries:
@@ -62,6 +72,7 @@ def main():
             src = "fallback" if fallback_by_latency.get(lat) else "llm"
             groups[(src, lat)].append((source_chunks, target_chunks))
 
+    # Average each bucket and report it, plus how often matched beat shuffled.
     for src in ("llm", "fallback"):
         print("=" * 70)
         print(f"SOURCE = {src}")

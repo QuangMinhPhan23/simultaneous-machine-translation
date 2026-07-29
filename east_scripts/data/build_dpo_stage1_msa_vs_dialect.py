@@ -14,6 +14,7 @@ import sacrebleu
 
 
 def build_prompt(instruction, input_text):
+    """Joins the instruction and the source text into the single prompt string DPO expects."""
     return f"{instruction}\n{input_text}" if input_text else instruction
 
 
@@ -29,17 +30,22 @@ if __name__ == "__main__":
                               "chrF++ against the reference; 100 disables the filter")
     args = parser.parse_args()
 
+    # Step 1: read the model outputs generated earlier by generate_candidates.py.
     with open(args.candidates_path, "r", encoding="utf-8") as f:
         candidates = json.load(f)
 
+    # Step 2: build one preference pair per candidate. The human reference is always the
+    # "chosen" side and the model's own output is the "rejected" side.
     pairs = []
     n_dropped = 0
     for c in candidates:
         chosen = c["reference"].strip()
         rejected = c["prediction"].strip()
+        # An empty or identical prediction gives no contrast to learn from.
         if len(rejected) < args.min_prediction_chars or rejected == chosen:
             n_dropped += 1
             continue
+        # Measure how close the two sides are, and drop the pair if they nearly agree.
         score = sacrebleu.sentence_chrf(rejected, [chosen], word_order=2).score
         if score >= args.max_chrf:
             n_dropped += 1
@@ -51,6 +57,7 @@ if __name__ == "__main__":
             "rejected_chrf": score,
         })
 
+    # Step 3: write the pairs out, ready for DPO training.
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(pairs, f, ensure_ascii=False, indent=2)

@@ -129,12 +129,15 @@ def normalize_for_comparison(text):
 
 
 def reconstruction_similarity(chunks, original):
+    """Glues the chunks back together and returns how close (0-1) they are to the original
+    sentence."""
     joined = normalize_for_comparison("".join(chunks))
     original_norm = normalize_for_comparison(original)
     return difflib.SequenceMatcher(None, joined, original_norm).ratio()
 
 
 def reconstructs(chunks, original, min_similarity):
+    """True when the chunks rebuild the original sentence closely enough to accept."""
     return reconstruction_similarity(chunks, original) >= min_similarity
 
 
@@ -157,6 +160,7 @@ def parse_chunk_response(response_text, source, target, min_similarity=DEFAULT_M
         reason_by_latency = {latency: "json_parse_failed" for latency in LATENCY_CHUNK_WORDS}
         return chunks_by_latency, fallback_by_latency, reason_by_latency
 
+    # Check each latency in turn: the first failing test sets the reason and stops the checks.
     chunks_by_latency, fallback_by_latency, reason_by_latency = {}, {}, {}
     for latency, json_key in LATENCY_JSON_KEYS.items():
         chunk_words = LATENCY_CHUNK_WORDS[latency]
@@ -193,6 +197,8 @@ _EXTRA_TURN_END_TOKENS = ["<|eot_id|>", "<end_of_turn>"]
 
 
 def _resolve_eos_token_ids(tokenizer):
+    """Collects every token id that should stop generation: the tokenizer's own EOS plus any
+    of the extra turn-end tokens this model happens to know."""
     eos_ids = set()
     if tokenizer.eos_token_id is not None:
         eos_ids.add(tokenizer.eos_token_id)
@@ -204,6 +210,8 @@ def _resolve_eos_token_ids(tokenizer):
 
 
 class ChunkGenerator:
+    """Loads a chat model once, then chunks sentence pairs one at a time on request."""
+
     def __init__(self, model_path, min_similarity=DEFAULT_MIN_RECONSTRUCTION_SIMILARITY, debug_raw_responses=0):
         self.min_similarity = min_similarity
         # Prints the next N raw responses to stderr, before parsing throws the text away.
@@ -220,6 +228,7 @@ class ChunkGenerator:
     @torch.no_grad()
     def generate_chunks(self, source, target, tgt_lang):
         """Returns (chunks_by_latency, fallback_by_latency, reason_by_latency), see parse_chunk_response."""
+        # Fill the prompt template, then wrap it in the model's own chat format.
         prompt = CHUNK_PROMPT.format(source=source, target=target, tgt_lang=tgt_lang)
         prompt_text = self.tokenizer.apply_chat_template(
             [{"role": "user", "content": prompt}], tokenize=False, add_generation_prompt=True,
@@ -232,6 +241,7 @@ class ChunkGenerator:
             eos_token_id=self.eos_token_ids,
             pad_token_id=self.tokenizer.pad_token_id or self.tokenizer.eos_token_id,
         )
+        # Decode only the newly generated part, not the prompt that was fed back in.
         response_text = self.tokenizer.decode(output_ids[0][inputs["input_ids"].shape[-1]:], skip_special_tokens=True)
 
         if self.debug_raw_responses > 0:
@@ -257,6 +267,7 @@ def load_existing(output_path):
 
 
 def main():
+    """Chunks every turn of one Alexandria split and writes the entries to --output."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--chunker_model", choices=list(CHUNKER_MODELS.keys()), required=True)
     parser.add_argument("--country", default="EG")
@@ -277,6 +288,7 @@ def main():
                               "parse failures")
     args = parser.parse_args()
 
+    # Step 1: load the chunker model onto the GPU. This is the slow part of startup.
     model_path = CHUNKER_MODELS[args.chunker_model]
     print(f"Loading chunker model: {model_path}")
     generator = ChunkGenerator(model_path, min_similarity=args.min_reconstruction_similarity,
@@ -285,11 +297,13 @@ def main():
     dataset = load_dataset("UBC-NLP/alexandria", name=args.country, split=args.split)
     tgt_dialect_name = DIALECT_NAMES.get(args.country, f"Arabic ({args.country})")
 
+    # Step 2: with --resume, reuse the good entries from a previous run and skip those turns.
     entries, done = load_existing(args.output) if args.resume else ([], set())
     n_processed, n_fallback = 0, 0
     fallback_reasons = Counter()
     n_fallback_by_latency = Counter()
 
+    # Step 3: chunk each conversation turn, one model call per turn.
     for conv in dataset:
         conv_id = conv["conv_id"]
         for turn_idx, (eng_turn, dia_turn) in enumerate(zip(conv["english_conversation"], conv["dialectal_conversation"])):
@@ -311,6 +325,8 @@ def main():
             try:
                 chunks_by_latency, fallback_by_latency, reason_by_latency = generator.generate_chunks(source, target, tgt_lang)
             except Exception as e:
+                # If the model call itself crashes, use the word-count split for this turn and
+                # keep going, rather than losing the whole run.
                 print(f"WARNING: generation failed for conv={conv_id} turn={turn_idx} ({e}); using heuristic fallback",
                       file=sys.stderr)
                 chunks_by_latency = build_fallback_chunks_all_latencies(source, target)
@@ -338,6 +354,8 @@ def main():
                     n_fallback_by_latency[latency] += 1
                     fallback_reasons[f"{latency}:{reason}"] += 1
 
+            # Flush to disk regularly, so a job that runs out of walltime leaves something
+            # that --resume can continue from.
             if n_processed % args.save_every == 0:
                 with open(args.output, "w", encoding="utf-8") as f:
                     json.dump(entries, f, ensure_ascii=False, indent=2)
@@ -346,6 +364,7 @@ def main():
         if args.max_examples and n_processed >= args.max_examples:
             break
 
+    # Step 4: write the finished file and report the fallback rate per latency.
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(entries, f, ensure_ascii=False, indent=2)

@@ -36,6 +36,11 @@ def parse_chunks(output):
 
 
 def main():
+    """Measure how well chunk i of the source lines up with chunk i of the target.
+
+    Each chunk pair is embedded with a multilingual sentence encoder and compared by cosine
+    similarity. The same chunks are then compared in a shuffled order as a control: if the real
+    pairing is meaningful, matched similarity should clearly beat shuffled similarity."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", default="data/mt_data/train_data/Arabic-EG-SiMT-OMT.json")
     parser.add_argument("--latency", default=None, choices=["low", "medium", "high", None])
@@ -47,6 +52,9 @@ def main():
 
     random.seed(args.seed)
 
+    # Step 1: keep only the simultaneous rows (the offline rows have no latency field and no
+    # chunk markers), then split each one back into chunk pairs. A row with a single chunk
+    # cannot be shuffled, so at least two are required.
     with open(args.data, "r", encoding="utf-8") as f:
         data = json.load(f)
 
@@ -68,6 +76,8 @@ def main():
     print(f"Loading {args.model} (first run downloads the model)...")
     model = SentenceTransformer(args.model)
 
+    # Step 2: for each example, embed its source and target chunks and build the full similarity
+    # matrix, then compare the diagonal (the real pairing) with a shuffled pairing.
     per_example_results = []
     for latency, pairs in parsed:
         sources = [p[0] for p in pairs]
@@ -97,6 +107,8 @@ def main():
             "pairs": pairs,
         })
 
+    # Step 3: sort by gap (matched minus shuffled), so the worst examples come first and can be
+    # printed at the end for manual inspection.
     per_example_results.sort(key=lambda r: r["gap"])
 
     n_total = len(per_example_results)
@@ -111,6 +123,8 @@ def main():
     print(f"Mean matched (chunk i vs chunk i) similarity:   {avg_matched:.4f}")
     print(f"Mean shuffled (chunk i vs random chunk j) sim:  {avg_shuffled:.4f}")
     print(f"Matched beats shuffled in {n_matched_wins}/{n_total} examples ({100*n_matched_wins/n_total:.1f}%)")
+    # Step 4: the same numbers per latency level. Finer chunking (low latency) means shorter
+    # chunks, which are harder to align.
     print()
     print("By latency level:")
     for lat in ["low", "medium", "high"]:

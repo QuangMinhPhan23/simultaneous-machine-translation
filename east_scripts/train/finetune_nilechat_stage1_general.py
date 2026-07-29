@@ -28,6 +28,11 @@ NEW_SPECIAL_TOKENS = ["<|end-of-read|>", "<|end-of-write|>"]
 
 
 class AlpacaSFTDataset(Dataset):
+    """Turns Alpaca-style rows (instruction / input / output) into token ids for training.
+
+    Each row becomes one chat turn: the user side is the instruction, the answer side is the
+    interleaved read/write output the model has to learn to produce."""
+
     def __init__(self, examples, tokenizer, cutoff_len):
         self.examples = examples
         self.tokenizer = tokenizer
@@ -37,11 +42,14 @@ class AlpacaSFTDataset(Dataset):
         return len(self.examples)
 
     def __getitem__(self, idx):
+        """Tokenize one example and mask the prompt so the loss only sees the answer."""
         ex = self.examples[idx]
         user_content = ex["instruction"]
         if ex.get("input"):
             user_content = f"{user_content}\n{ex['input']}"
 
+        # Wrap the instruction in the model's own chat format, then append the target answer
+        # and the turn-end token so the model learns where to stop.
         prompt_text = self.tokenizer.apply_chat_template(
             [{"role": "user", "content": user_content}],
             tokenize=False,
@@ -53,6 +61,8 @@ class AlpacaSFTDataset(Dataset):
         full_ids = self.tokenizer(full_text, add_special_tokens=False).input_ids
         full_ids = full_ids[: self.cutoff_len]
 
+        # -100 is the "ignore me" label id. Setting it on every prompt token means the model is
+        # only scored on the answer it has to generate, not on the instruction it was given.
         labels = list(full_ids)
         prompt_len = min(len(prompt_ids), len(full_ids))
         for i in range(prompt_len):
@@ -62,6 +72,10 @@ class AlpacaSFTDataset(Dataset):
 
 
 def make_collate_fn(pad_token_id):
+    """Builds the batching function: pads every sequence in a batch to the longest one.
+
+    Padded positions get label -100 and attention 0, so they contribute nothing."""
+
     def collate(batch):
         max_len = max(len(item["input_ids"]) for item in batch)
         input_ids, labels, attention_mask = [], [], []
@@ -79,6 +93,9 @@ def make_collate_fn(pad_token_id):
 
 
 def build_general_stage1_data(simt_multi_path_hint, omt_path, n_simt, n_omt, seed):
+    """Mixes simultaneous (SiMT) and offline (OMT) training rows into one shuffled list.
+
+    The SiMT rows teach the read/write mechanism; the OMT rows keep plain translation quality up."""
     # build_simt_replay() pulls SiMT-Multi-90K from the HF Hub, so the path hint is unused.
     del simt_multi_path_hint
     simt_examples = build_simt_replay(n_simt, seed)
@@ -89,6 +106,7 @@ def build_general_stage1_data(simt_multi_path_hint, omt_path, n_simt, n_omt, see
 
 
 def main():
+    """Runs the whole Stage I job: add the read/write tokens, train every weight, save."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_path", default="MBZUAI-Paris/Nile-Chat-4B")
     parser.add_argument("--omt_path", default="data/mt_data/train_data/Off-Multi-120K.json")
@@ -116,6 +134,8 @@ def main():
 
     random.seed(args.seed)
 
+    # Step 1: add the two read/write markers to the vocabulary as single tokens, and make the
+    # turn-end token the EOS. The base model has never seen these markers before.
     tokenizer = AutoTokenizer.from_pretrained(args.model_path, use_fast=True, trust_remote_code=True)
     num_added = tokenizer.add_special_tokens({
         "eos_token": EOT_TOKEN,
@@ -125,6 +145,10 @@ def main():
         tokenizer.pad_token = tokenizer.eos_token
     print(f"Added {num_added} new tokens to the vocabulary (expect {len(NEW_SPECIAL_TOKENS)})")
 
+    # Step 2: load the base model in bfloat16 and grow its embedding table to fit the two new
+    # tokens; mean_resizing starts them from the average of the existing embeddings instead of
+    # random noise. Gradient checkpointing recomputes activations in the backward pass to save
+    # memory. Unlike Stage II there is no LoRA here: every weight is trained.
     model = AutoModelForCausalLM.from_pretrained(
         args.model_path,
         trust_remote_code=True,
@@ -134,6 +158,7 @@ def main():
     model.resize_token_embeddings(len(tokenizer), mean_resizing=True)
     model.gradient_checkpointing_enable()
 
+    # Step 3: build and shuffle the SiMT + OMT mix.
     examples = build_general_stage1_data(None, args.omt_path, args.n_simt, args.n_omt, args.seed)
     random.shuffle(examples)
     if args.max_examples:
@@ -142,11 +167,16 @@ def main():
 
     dataset = AlpacaSFTDataset(examples, tokenizer, args.cutoff_len)
 
+    # Step 4: decide whether checkpoints go to the HF Hub. Without a token the push is switched
+    # off rather than failing later.
     push_to_hub = bool(args.hub_repo_id)
     if push_to_hub and not os.environ.get("HF_TOKEN"):
         print("WARNING: --hub_repo_id/HF_REPO_ID set but $HF_TOKEN is not -- disabling auto-push.", file=sys.stderr)
         push_to_hub = False
 
+    # Step 5: training settings. Effective batch size is per_device_train_batch_size x
+    # gradient_accumulation_steps, i.e. several small batches are summed into one weight update.
+    # The 8-bit paged optimizer keeps the optimizer state small enough for full-parameter training.
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         per_device_train_batch_size=args.per_device_train_batch_size,
@@ -170,6 +200,10 @@ def main():
         hub_private_repo=True,
     )
 
+    # Step 6: the training loop itself. Trainer repeatedly takes a batch, runs it through the
+    # model, compares the predicted next token with the label at each answer position, and
+    # updates the weights. If the output dir already holds a checkpoint it picks up there, so a
+    # job killed by the walltime limit can just be resubmitted.
     trainer = Trainer(
         model=model,
         args=training_args,
@@ -182,6 +216,7 @@ def main():
         print(f"Resuming from checkpoint: {last_checkpoint}")
     trainer.train(resume_from_checkpoint=last_checkpoint)
 
+    # Step 7: save the finished model, which becomes the starting point for Stage II.
     final_dir = f"{args.output_dir.rstrip('/')}/final"
     print(f"Saving Stage I checkpoint to {final_dir}")
     # Some transformers versions push inside save_model(); turn it off so a

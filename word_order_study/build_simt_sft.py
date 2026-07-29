@@ -15,8 +15,8 @@ from collections import Counter
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 DATA = os.path.join(HERE, "data")
-sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(REPO, "east_scripts", "data"))
+sys.path.insert(0, HERE)                                # chunk_prompts
+sys.path.insert(0, os.path.join(REPO, "east_scripts", "data"))  # reuse the Arabic pipeline's core
 
 import chunk_prompts
 from build_arabic_simt_sft_data import (
@@ -28,6 +28,7 @@ EXT = {"vietnamese": "vi", "msa": "ar", "korean": "ko", "saudi": "ar", "egyptian
 
 
 def read_lines(path):
+    """Read a text file into a list of lines, with the trailing newline removed."""
     with open(path, encoding="utf-8") as f:
         return [ln.rstrip("\n") for ln in f]
 
@@ -38,6 +39,8 @@ def merge_small(src_chunks, tgt_chunks, min_words):
     if min_words <= 1 or len(src_chunks) <= 1:
         return src_chunks, tgt_chunks
     s, t = list(src_chunks), list(tgt_chunks)
+    # Walk the chunks. When pair i is too short, glue it onto the pair before it (or the pair
+    # after it, if i is the first), then re-check the merged pair in case it is still too short.
     i = 0
     while i < len(s) and len(s) > 1:
         if min(len(s[i].split()), len(t[i].split())) < min_words:
@@ -53,17 +56,26 @@ def merge_small(src_chunks, tgt_chunks, min_words):
 
 
 def build(args):
+    """Turn one language's parallel files into the training examples.
+
+    Returns (examples, stats): the list of alpaca-style examples, and a counter with the number of
+    sentence pairs used and how many times each latency fell back to the word-count split."""
+    # Step 1: load the parallel sentences. The two files are line-aligned, so line i of the English
+    # file is the translation of line i of the target file.
     ext = EXT[args.language]
     src = read_lines(os.path.join(DATA, args.language, f"{args.split}.en"))
     tgt = read_lines(os.path.join(DATA, args.language, f"{args.split}.{ext}"))
     if len(src) != len(tgt):
         raise SystemExit(f"line counts differ: {len(src)} vs {len(tgt)}")
 
+    # Step 2: load the chunks file into an idx -> entry lookup, if one was given. Without it every
+    # sentence is split by word count.
     precomputed = None
     if args.chunks_path:
         with open(args.chunks_path, encoding="utf-8") as f:
             precomputed = {e["idx"]: e for e in json.load(f)}
 
+    # Step 3: build the examples one sentence pair at a time.
     src_lang, tgt_lang = "English", chunk_prompts.TGT_LANG_NAME[args.language]
     examples, stats = [], Counter()
     for idx, (s, t) in enumerate(zip(src, tgt)):
@@ -75,6 +87,9 @@ def build(args):
         entry = precomputed.get(idx) if precomputed else None
         stats["pairs"] += 1
 
+        # One SiMT example per latency. --granularity turn ignores any chunking and keeps the
+        # sentence whole; otherwise the chunks come from the chunks file when that (idx, latency)
+        # is present, and from the word-count split otherwise.
         for latency, words in LATENCY_CHUNK_WORDS.items():
             if args.granularity == "turn":
                 sc, tc = whole_sentence_chunk(s), whole_sentence_chunk(t)
@@ -86,6 +101,8 @@ def build(args):
                     stats[f"fallback_{latency}"] += 1
                 sc, tc = chunk_sentence_pair(s, t, words)
             sc, tc = merge_small(sc, tc, args.merge_min_words)
+            # interleave_chunks renders the read/write turns as one string with the EOR / EOW
+            # tokens. It returns None if the chunk list is empty, in which case skip this example.
             output = interleave_chunks(sc, tc)
             if output is None:
                 continue
@@ -95,6 +112,7 @@ def build(args):
                 "src_lang": src_lang, "tgt_lang": tgt_lang, "latency": latency,
             })
 
+        # Plus one offline example for the same pair: whole sentence in, whole translation out.
         examples.append({
             "instruction": OMT_INSTRUCTION.format(src_lang=src_lang, tgt_lang=tgt_lang),
             "input": s, "output": t, "src_lang": src_lang, "tgt_lang": tgt_lang,
@@ -117,14 +135,18 @@ def main():
     ap.add_argument("--output", default=None)
     args = ap.parse_args()
 
+    # Step 1: pick the output path. By default it is named after the language, method and split.
     if args.output is None:
         args.output = os.path.join(DATA, args.language, f"simt-{args.method}.{args.split}.json")
 
+    # Step 2: build the examples and write them out as a single JSON list.
     examples, stats = build(args)
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(examples, f, ensure_ascii=False, indent=2)
 
+    # Step 3: report the counts. Only the SiMT examples carry a "latency" field, so the rest are
+    # the offline ones. With a chunks file, also report per latency how often it had no chunks.
     n_simt = sum(1 for e in examples if "latency" in e)
     print(f"{args.language}/{args.method}: wrote {len(examples)} examples "
           f"({n_simt} SiMT, {len(examples) - n_simt} OMT) from {stats['pairs']} pairs -> {args.output}")

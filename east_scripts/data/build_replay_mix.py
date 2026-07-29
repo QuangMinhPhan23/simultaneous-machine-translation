@@ -16,6 +16,8 @@ from build_arabic_simt_sft_data import SIMT_INSTRUCTION, interleave_chunks
 
 
 def build_simt_replay(n_samples, seed):
+    """Samples n_samples rows from the multilingual SiMT set and converts each one into an
+    alpaca-style example, rebuilding the interleaved output string from its chunk lists."""
     ds = load_dataset("biaofu-xmu/SiMT-Multi-90K")["train"]
     rng = random.Random(seed)
     indices = rng.sample(range(len(ds)), min(n_samples, len(ds)))
@@ -42,6 +44,8 @@ def build_simt_replay(n_samples, seed):
 
 
 def build_omt_replay(omt_path, n_samples, seed):
+    """Samples n_samples offline examples from the paper's original training file. These are
+    already in the right schema, so they are copied as they are."""
     with open(omt_path, "r", encoding="utf-8") as f:
         data = json.load(f)
     rng = random.Random(seed + 1)
@@ -58,12 +62,15 @@ if __name__ == "__main__":
     parser.add_argument("--output", default="data/mt_data/train_data/Arabic-EG-SiMT-OMT-with-replay.json")
     args = parser.parse_args()
 
+    # Step 1: load the Arabic training data, which is kept in full.
     with open(args.arabic_path, "r", encoding="utf-8") as f:
         arabic_examples = json.load(f)
 
+    # Step 2: draw the two replay samples from the paper's original training data.
     simt_replay = build_simt_replay(args.n_simt_replay, args.seed)
     omt_replay = build_omt_replay(args.omt_replay_path, args.n_omt_replay, args.seed)
 
+    # Step 3: shuffle everything together so the replay data is spread across training.
     combined = arabic_examples + simt_replay + omt_replay
     random.Random(args.seed).shuffle(combined)
 

@@ -102,6 +102,7 @@ _EX_TGT = {
     },
 }
 
+# The exact JSON shape the model is told to answer with: all three latencies in one object.
 _SCHEMA_LINE = ('{"low_latency": {"source_chunks": ["...", "..."], "target_chunks": ["...", "..."]}, '
                 '"medium_latency": {"source_chunks": ["...", "..."], "target_chunks": ["...", "..."]}, '
                 '"high_latency": {"source_chunks": ["...", "..."], "target_chunks": ["...", "..."]}}')
@@ -112,6 +113,8 @@ SRC_SENTINEL, TGT_SENTINEL = "__SOURCE__", "__TARGET__"
 
 
 def _example_json(language):
+    """Render the worked example as the JSON the model should imitate: the shared English chunks
+    paired with that language's target chunks, at all three latencies."""
     tgt = _EX_TGT[language]
     obj = {
         "low_latency": {"source_chunks": _EX_EN["low"], "target_chunks": tgt["low"]},
@@ -174,11 +177,13 @@ _SCHEMA_SINGLE = '{"source_chunks": ["...", "..."], "target_chunks": ["...", "..
 
 
 def _example_json_single(language, latency):
+    """Same worked example as _example_json, cut down to one latency."""
     obj = {"source_chunks": _EX_EN[latency], "target_chunks": _EX_TGT[language][latency]}
     return json.dumps(obj, ensure_ascii=False, indent=2)
 
 
 def get_template_single(method, language, latency):
+    """Return the single-latency prompt with everything baked in except the two sentinels."""
     assert method in ("generic", "specific"), method
     assert language in LANGUAGES, language
     assert latency in ("low", "medium", "high"), latency

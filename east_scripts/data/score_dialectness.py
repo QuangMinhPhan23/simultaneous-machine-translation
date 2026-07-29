@@ -13,6 +13,7 @@ import sys
 
 
 def _require_transformers():
+    """Checks the optional deps are installed and exits with an install hint if not."""
     try:
         import torch  # noqa: F401
         from transformers import AutoModelForSequenceClassification, AutoTokenizer  # noqa: F401
@@ -25,6 +26,7 @@ def _require_transformers():
 
 
 def _pick_device(device):
+    """Returns the caller's device if given, otherwise the GPU when one is available."""
     import torch
     if device:
         return device
@@ -50,6 +52,8 @@ class ALDiScorer:
 
     def score(self, texts):
         """texts: list[str] -> list[float] in [0, 1]. Empty/whitespace -> 0.0."""
+        # Score only the non-empty texts, and fill the blank ones with 0.0 directly. Results
+        # are written back by original position, so the output order matches the input.
         out = [None] * len(texts)
         idx = [i for i, t in enumerate(texts) if t and t.strip()]
         for i in [j for j in range(len(texts)) if j not in set(idx)]:
@@ -61,6 +65,7 @@ class ALDiScorer:
                                  max_length=self.max_length, return_tensors="pt").to(self.device)
             with self.torch.no_grad():
                 logits = self.model(**enc).logits  # [B, 1] regression head
+            # The regression head can predict slightly outside [0, 1], so clamp it.
             for i, val in zip(batch_idx, logits[:, 0].tolist()):
                 out[i] = min(max(0.0, val), 1.0)
         return out
@@ -84,6 +89,8 @@ class DialectIDScorer:
         self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
         self.model.to(self.device).eval()
 
+        # Find which output slot belongs to the country we care about, and fail early if this
+        # model does not have that label at all.
         self.id2label = self.model.config.id2label
         label2id = {v: k for k, v in self.id2label.items()}
         if target_label not in label2id:
@@ -95,6 +102,8 @@ class DialectIDScorer:
         self.target_id = label2id[target_label]
 
     def score(self, texts):
+        """texts: list[str] -> one dict per text with the target label's probability, the
+        model's top label and its probability. Empty/whitespace scores 0.0."""
         out = [None] * len(texts)
         idx = [i for i, t in enumerate(texts) if t and t.strip()]
         for i in [j for j in range(len(texts)) if j not in set(idx)]:
@@ -136,6 +145,7 @@ def extract_texts(records, field=None):
 
 
 def _summ(vals):
+    """One-line summary of a list of scores: count, mean, min, median and max."""
     xs = sorted(vals)
     n = len(xs)
     if n == 0:
@@ -145,6 +155,8 @@ def _summ(vals):
 
 
 def _selftest():
+    """Scores the same sentence in MSA and in Egyptian and asserts the Egyptian one scores
+    higher. A cheap check that the model loaded correctly."""
     msa = "أريد أن أذهب إلى السوق الآن"   # "I want to go to the market now", MSA
     egy = "عايز أروح السوق دلوقتي"                 # same sentence, Egyptian
     print("Loading ALDi (first run downloads the model)...", file=sys.stderr)
@@ -179,6 +191,8 @@ if __name__ == "__main__":
     if not args.input:
         parser.error("--input is required (or use --selftest)")
 
+    # Step 1: read the input as either one sentence per line or a json list, then pull out
+    # the text to score.
     if args.input.endswith(".txt"):
         with open(args.input, encoding="utf-8") as f:
             records = [ln.rstrip("\n") for ln in f if ln.strip()]
@@ -187,6 +201,7 @@ if __name__ == "__main__":
             records = json.load(f)
     texts = extract_texts(records, args.text_field)
 
+    # Step 2: run whichever scorers were asked for and print a summary of each.
     aldi_scores = did_scores = None
     if args.scorer in ("aldi", "both"):
         aldi_scores = ALDiScorer(device=args.device, batch_size=args.batch_size).score(texts)
@@ -199,12 +214,14 @@ if __name__ == "__main__":
         print(f"DID P({args.target_label}): {_summ(p_tgt)}; "
               f"top-label=={args.target_label} for {n_top}/{len(did_scores)}", file=sys.stderr)
 
+    # Step 3: preview how many records a dialectness threshold would keep.
     if args.min_dialectness is not None and aldi_scores is not None:
         keep = [s >= args.min_dialectness for s in aldi_scores]
         n_keep = sum(keep)
         print(f"keep (ALDi >= {args.min_dialectness}): {n_keep}/{len(keep)} "
               f"({100 * n_keep / max(1, len(keep)):.1f}%); drop {len(keep) - n_keep}", file=sys.stderr)
 
+    # Step 4: write the input records back out with the scores attached to each one.
     if args.output:
         annotated = []
         for i, r in enumerate(records):

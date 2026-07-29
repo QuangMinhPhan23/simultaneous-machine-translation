@@ -27,12 +27,14 @@ DIALECT_NAMES = {
 
 
 def build_test_set(country, domain, split, direction, tgt_label=None):
+    """Turns every conversation turn of the chosen slice into one source/reference test example."""
     dataset = load_dataset("UBC-NLP/alexandria", name=country, split=split)
     if domain is not None:
         dataset = dataset.filter(lambda x: x["domain"] == domain)
 
     tgt_dialect_name = tgt_label or DIALECT_NAMES.get(country, f"Arabic ({country})")
 
+    # The two conversations are turn-aligned, so turn i of each is the same utterance.
     examples = []
     for conv in dataset:
         for eng_turn, dia_turn in zip(conv["english_conversation"], conv["dialectal_conversation"]):
@@ -41,6 +43,7 @@ def build_test_set(country, domain, split, direction, tgt_label=None):
             if not eng_text or not dia_text:
                 continue
 
+            # The direction decides which language is the source and which is the reference.
             if direction == "en2ar":
                 source, reference = eng_text, dia_text
                 src_lang, tgt_lang = "English", tgt_dialect_name
@@ -74,9 +77,12 @@ if __name__ == "__main__":
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
 
+    # An empty --domain string means "all domains", so turn it into None.
     domain = args.domain or None
     examples = build_test_set(args.country, domain, args.split, args.direction, args.tgt_label)
 
+    # With no --output given, name the file after the slice it contains, so different test
+    # sets do not overwrite each other.
     if args.output is None:
         domain_tag = domain.lower().replace(" ", "_") if domain else "all_domains"
         label_tag = "" if not args.tgt_label else "." + args.tgt_label.lower().split(" ")[0].strip("(),")

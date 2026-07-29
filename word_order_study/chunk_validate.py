@@ -15,6 +15,7 @@ DEFAULT_MIN_SIMILARITY = 0.97
 
 
 def _is_punct_or_symbol(ch):
+    """True if the character is punctuation or a symbol (Unicode category starting with P or S)."""
     return unicodedata.category(ch)[0] in ("P", "S")
 
 
@@ -25,7 +26,12 @@ def content_only(text):
 
 
 def reconstructs(chunks, original, min_similarity):
+    """True if joining the chunks gives back the original sentence.
+
+    Only content characters are compared, so a dropped comma or space still passes, but a
+    dropped or invented word pushes the similarity below min_similarity and fails."""
     orig = content_only(original)
+    # A sentence made of nothing but punctuation and spaces has no content to check.
     if not orig:
         return True
     joined = content_only("".join(chunks))
@@ -33,12 +39,15 @@ def reconstructs(chunks, original, min_similarity):
 
 
 def _strip_empty(chunks):
+    """Drop anything in the list that is not a string, or is blank."""
     return [c for c in chunks if isinstance(c, str) and c.strip()]
 
 
 def parse_chunk_response_wo(response_text, source, target, min_similarity=DEFAULT_MIN_SIMILARITY):
     """Same contract as generate_semantic_chunks.parse_chunk_response:
     returns (chunks_by_latency, fallback_by_latency, reason_by_latency)."""
+    # If no JSON object can be pulled out of the reply, nothing is usable: every latency falls
+    # back to the word-count split with the same reason.
     parsed = extract_json_object(response_text)
     if not isinstance(parsed, dict):
         return (
@@ -47,6 +56,8 @@ def parse_chunk_response_wo(response_text, source, target, min_similarity=DEFAUL
             {lat: "json_parse_failed" for lat in LATENCY_CHUNK_WORDS},
         )
 
+    # Check each latency on its own, so one bad latency does not throw away the other two. `reason`
+    # stays None while the answer is still good, and holds the first problem found otherwise.
     chunks_by_latency, fallback_by_latency, reason_by_latency = {}, {}, {}
     for latency, json_key in LATENCY_JSON_KEYS.items():
         chunk_words = LATENCY_CHUNK_WORDS[latency]
@@ -66,6 +77,8 @@ def parse_chunk_response_wo(response_text, source, target, min_similarity=DEFAUL
                 elif not reconstructs(sc, source, min_similarity) or not reconstructs(tc, target, min_similarity):
                     reason = "reconstruction_mismatch"
 
+        # Passed: keep the model's chunks, with align_chunks forcing the two sides to the same
+        # count. Failed: use the word-count split for this latency instead.
         if reason is None:
             chunks_by_latency[latency] = align_chunks(sc, tc)
         else:

@@ -17,6 +17,7 @@ LATIN_RUN = re.compile(r"[A-Za-z]{2,}")
 
 
 def esc(text):
+    """Escape text before it goes into the HTML, so source text cannot break the page."""
     return html.escape(text, quote=False)
 
 
@@ -26,6 +27,9 @@ def load_json(path):
 
 
 def load_chunks(path):
+    """Load one chunker's output, keyed by (conversation id, turn index).
+
+    That key is what lets the same turn be looked up across all three chunkers."""
     with open(path, "r", encoding="utf-8") as f:
         return {(e["conv_id"], e["turn_idx"]): e for e in json.load(f)}
 
@@ -35,6 +39,7 @@ def word_count(text):
 
 
 def entry_fallback(entry, latency):
+    """True if this chunker had to use the word-count backup at this latency."""
     return entry.get("fallback_by_latency", {}).get(latency, False)
 
 
@@ -43,6 +48,7 @@ def entry_chunks(entry, latency):
 
 
 def has_repetition_loop(text, min_repeats=4):
+    """True if the same word repeats several times in a row, a common generation failure."""
     words = text.split()
     run_word, run_len = None, 0
     for w in words:
@@ -56,12 +62,18 @@ def has_repetition_loop(text, min_repeats=4):
 
 
 def has_code_switch(text):
+    """True if the text contains a run of Latin letters, i.e. English inside the Arabic."""
     return bool(LATIN_RUN.search(text))
 
 
 # ---------- chunk-boundary section ----------
 
 def pick_chunk_examples(n_success, n_fallback, seed, min_words, max_words, latency):
+    """Pick turns to show in the chunk-boundary section, at one latency level.
+
+    Only turns that all three chunkers handled are usable, since the point is to compare them
+    side by side. Two samples are drawn: turns where every chunker succeeded, and turns where at
+    least one fell back, so a reviewer sees both."""
     llama = load_chunks("data/mt_data/train_data/chunks-llama.json")
     gemma = load_chunks("data/mt_data/train_data/chunks-gemma.json")
     nilechat = load_chunks("data/mt_data/train_data/chunks-nilechat.json")
@@ -74,6 +86,7 @@ def pick_chunk_examples(n_success, n_fallback, seed, min_words, max_words, laten
     }
 
     def source_len_ok(key):
+        """Keep turns of a readable length: very short or very long ones are hard to judge."""
         n_words = word_count("".join(entry_chunks(llama[key], latency)["source_chunks"]))
         return min_words <= n_words <= max_words
 
@@ -98,6 +111,10 @@ def pick_chunk_examples(n_success, n_fallback, seed, min_words, max_words, laten
 
 
 def render_chunk_table(examples, latency):
+    """Build the chunk-comparison table: one block per turn, four rows inside it.
+
+    The first row is the uncut reference sentence pair, then one row per chunker showing where it
+    cut, with the chunks joined by " / ". Each chunker row carries a Y/N checklist."""
     if not examples:
         return "<p>No examples matched the requested filters.</p>"
     rows = []
@@ -141,6 +158,7 @@ def render_chunk_table(examples, latency):
 # ---------- translation section ----------
 
 def load_predictions_maybe(path):
+    """Load one cell's predictions keyed by index, or None if that cell was never evaluated."""
     try:
         return {p["index"]: p for p in load_json(path)}
     except FileNotFoundError:
@@ -149,6 +167,11 @@ def load_predictions_maybe(path):
 
 def pick_translation_examples(model_key, variant, latency, results_root,
                                n_good, n_bad, n_repetition, n_codeswitch, n_random, seed):
+    """Choose which translations go in the review sheet, from five different buckets.
+
+    Sampling only the worst or only random examples would give a skewed picture, so the picks are
+    the lowest and highest COMET, detected repetition loops, code-switched text, and random.
+    Each index is used once: a bucket only draws from what earlier buckets did not take."""
     east8b_preds = load_predictions_maybe(f"{results_root}/east8b/{variant}/{latency}/prediction.json")
     nilechat_preds = load_predictions_maybe(f"{results_root}/nilechat/{variant}/{latency}/prediction.json")
     if east8b_preds is None and nilechat_preds is None:
@@ -157,6 +180,8 @@ def pick_translation_examples(model_key, variant, latency, results_root,
             "(neither east8b nor nilechat was evaluated on this cell)"
         )
 
+    # --model chooses which system's COMET scores decide "best" and "worst". If only one system
+    # was evaluated for this cell, that one is used for both the ranking and the row content.
     primary = east8b_preds if model_key == "east8b" else nilechat_preds
     if primary is None:
         primary = east8b_preds if east8b_preds is not None else nilechat_preds
@@ -166,6 +191,7 @@ def pick_translation_examples(model_key, variant, latency, results_root,
     else:
         common_idx = sorted(primary.keys())
 
+    # Rank by COMET, worst first. Sentences with no COMET score cannot be ranked.
     scored = [i for i in common_idx if "COMET" in primary[i]]
     ranked = sorted(scored, key=lambda i: primary[i]["COMET"])
 
@@ -181,6 +207,7 @@ def pick_translation_examples(model_key, variant, latency, results_root,
     picked.update(best)
 
     def any_model_repeats(i):
+        """True if either system got stuck repeating a word on this sentence."""
         preds = [p for p in (east8b_preds, nilechat_preds) if p is not None]
         return any(has_repetition_loop(p[i]["prediction"]) for p in preds)
 
@@ -199,6 +226,8 @@ def pick_translation_examples(model_key, variant, latency, results_root,
     picks += [("code-switched content", i) for i in codeswitch_pick]
     picked.update(codeswitch_pick)
 
+    # The random bucket draws from every remaining index, including unscored ones, so the sheet
+    # is not made up only of cases that some filter flagged.
     remaining = [i for i in common_idx if i not in picked]
     random_pick = rng.sample(remaining, min(n_random, len(remaining)))
     picks += [("random", i) for i in random_pick]
@@ -207,10 +236,15 @@ def pick_translation_examples(model_key, variant, latency, results_root,
 
 
 def render_translation_table(picks, east8b_preds, nilechat_preds):
+    """Build the translation table: one row per picked sentence.
+
+    Each row shows the English source, the human Egyptian reference, and both systems' output
+    with their scores and a Y/N checklist."""
     if not picks:
         return "<p>No examples available.</p>"
 
     def score_str(p):
+        """Format whichever of BLEU / COMET / AL this prediction happens to carry."""
         parts = []
         if "BLEU" in p:
             parts.append(f'BLEU {p["BLEU"]:.1f}')
@@ -228,6 +262,7 @@ def render_translation_table(picks, east8b_preds, nilechat_preds):
     )
 
     def output_cell(preds, idx, model_label):
+        """One system's cell for a row, or a placeholder if that system was not evaluated."""
         if preds is None:
             return f"<td>({esc(model_label)} not evaluated for this cell)</td>"
         p = preds[idx]
@@ -336,6 +371,8 @@ HTML_TEMPLATE = """<!doctype html>
 
 
 def main():
+    """Assemble the review sheet: chunk sections first, then the translation table, then write
+    the HTML file and print what went into it."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="nilechat", choices=["east8b", "nilechat"])
     parser.add_argument("--variant", default="chunk-llama")
@@ -357,6 +394,7 @@ def main():
     parser.add_argument("--out", default="combined_review.html")
     args = parser.parse_args()
 
+    # Step 1: one chunk-boundary section per requested latency, each with its own heading.
     chunk_sections = []
     total_chunk_examples = 0
     for lat in args.chunk_latencies:
@@ -372,12 +410,14 @@ def main():
             + render_chunk_table(chunk_examples, lat)
         )
 
+    # Step 2: the translation examples for the single --variant / --latency cell being reviewed.
     picks, east8b_preds, nilechat_preds = pick_translation_examples(
         args.model, args.variant, args.latency, args.results_root,
         args.n_translation_good, args.n_translation_bad, args.n_translation_repetition,
         args.n_translation_codeswitch, args.n_translation_random, args.seed,
     )
 
+    # Step 3: drop the rendered tables into the page template and write the file.
     out_html = HTML_TEMPLATE.format(
         model=esc(args.model), variant=esc(args.variant), latency=esc(args.latency),
         results_root=esc(args.results_root),
@@ -388,6 +428,8 @@ def main():
     with open(args.out, "w", encoding="utf-8") as f:
         f.write(out_html)
 
+    # Step 4: report how many examples each bucket contributed, so an empty bucket (for example
+    # no repetition loops found) is visible without opening the page.
     bucket_counts = {}
     for label, _ in picks:
         bucket_counts[label] = bucket_counts.get(label, 0) + 1

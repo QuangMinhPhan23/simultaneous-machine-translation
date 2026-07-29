@@ -17,6 +17,7 @@ NLLB_MSA_CODE = "arb_Arab"  # FLORES-200 code for Modern Standard Arabic
 
 
 def get_msa_forced_bos_id(tokenizer):
+    """Returns the token id NLLB uses to force its output into MSA."""
     # The lang-code lookup API changed across transformers versions, so try both.
     if hasattr(tokenizer, "lang_code_to_id"):
         return tokenizer.lang_code_to_id[NLLB_MSA_CODE]
@@ -24,6 +25,7 @@ def get_msa_forced_bos_id(tokenizer):
 
 
 def main():
+    """Translates the English source of every test example into MSA and writes the results."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_path", required=True,
                          help="Alexandria test-data file with a 'source' field. Must be the same "
@@ -34,6 +36,7 @@ def main():
     parser.add_argument("--max_new_tokens", type=int, default=128)
     args = parser.parse_args()
 
+    # Step 1: load NLLB with English set as the source language.
     tokenizer = AutoTokenizer.from_pretrained(args.model_name, src_lang="eng_Latn")
     model = AutoModelForSeq2SeqLM.from_pretrained(args.model_name, torch_dtype=torch.bfloat16)
     if torch.cuda.is_available():
@@ -45,6 +48,7 @@ def main():
     with open(args.data_path, "r", encoding="utf-8") as f:
         examples = json.load(f)
 
+    # Step 2: translate each English source into MSA, keeping the original list order.
     device = "cuda" if torch.cuda.is_available() else "cpu"
     results = []
     with torch.no_grad():
@@ -56,6 +60,7 @@ def main():
             msa_text = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
             results.append({"index": idx, "source": ex["source"], "msa_reference": msa_text})
 
+    # Step 3: save the MSA text along with its position, so rescoring can line the two files up.
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)

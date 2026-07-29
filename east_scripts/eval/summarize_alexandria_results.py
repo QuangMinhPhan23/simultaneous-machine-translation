@@ -19,6 +19,8 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    # Step 1: work out a short label for each root. "label=path" gives an explicit name,
+    # otherwise the folder name is used.
     roots = []
     for entry in args.result_root:
         if "=" in entry:
@@ -27,6 +29,8 @@ if __name__ == "__main__":
             label, path = os.path.basename(os.path.normpath(entry)), entry
         roots.append((label, path))
 
+    # Step 2: read one results.json per root and latency. A latency that was never run has no
+    # folder, so it is just skipped.
     rows = []
     for label, root in roots:
         for latency in LATENCIES:
@@ -39,6 +43,9 @@ if __name__ == "__main__":
             results["latency"] = latency
             rows.append(results)
 
+    # Step 3: print the table. The config column only appears when more than one root was given.
+    # BLEU / spBLEU / chrF++ / COMET / BERTScore / BLEURT measure quality (higher is better);
+    # AL and LAAL measure delay in source words (lower is better).
     show_config_col = len(roots) > 1
     # Any metric missing from a results.json just prints as an empty cell.
     header = (["config"] if show_config_col else []) + [
@@ -46,9 +53,11 @@ if __name__ == "__main__":
     widths = ([18] if show_config_col else []) + [14, 8, 8, 8, 8, 10, 8, 8, 8]
 
     def fmt_cell(value):
+        """Two decimals for numbers, blank for a metric this run does not have."""
         return f"{value:.2f}" if isinstance(value, float) else str(value) if value is not None else ""
 
     def fmt_row(values):
+        """Pad each cell to its column width so the columns line up in the terminal."""
         return "".join(f"{fmt_cell(v):<{w}}" for v, w in zip(values, widths))
 
     print(fmt_row(header))

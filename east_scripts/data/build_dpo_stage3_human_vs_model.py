@@ -22,17 +22,21 @@ if __name__ == "__main__":
                               "chrF++ against the reference")
     args = parser.parse_args()
 
+    # Step 1: read the Stage-2 checkpoint's outputs from generate_candidates.py.
     with open(args.candidates_path, "r", encoding="utf-8") as f:
         candidates = json.load(f)
 
+    # Step 2: pair each human reference against the model's own output for that prompt.
     pairs = []
     n_dropped = 0
     for c in candidates:
         chosen = c["reference"].strip()
         rejected = c["prediction"].strip()
+        # An empty or identical prediction gives no contrast to learn from.
         if not rejected or rejected == chosen:
             n_dropped += 1
             continue
+        # Measure how close the two sides are, and drop the pair if they nearly agree.
         score = sacrebleu.sentence_chrf(rejected, [chosen], word_order=2).score
         if score >= args.max_chrf:
             n_dropped += 1
@@ -44,6 +48,7 @@ if __name__ == "__main__":
             "rejected_chrf": score,
         })
 
+    # Step 3: write the pairs out, ready for DPO training.
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(pairs, f, ensure_ascii=False, indent=2)

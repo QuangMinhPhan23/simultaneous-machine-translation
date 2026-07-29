@@ -20,7 +20,10 @@ def load_json(path):
 
 
 def chrf_pp(hyps, refs):
-    """chrF++ = chrF with word_order=2 (sacrebleu convention)."""
+    """chrF++ = chrF with word_order=2 (sacrebleu convention).
+
+    It matches character n-grams plus word bigrams, so a differently spelled but correct word
+    still earns partial credit. Returns the corpus score and the per-sentence scores."""
     corpus = sacrebleu.corpus_chrf(hyps, [refs], word_order=2).score
     per_sentence = [
         sacrebleu.sentence_chrf(h, [r], word_order=2).score for h, r in zip(hyps, refs)
@@ -29,6 +32,9 @@ def chrf_pp(hyps, refs):
 
 
 def bert_score_arabic(hyps, refs, model_type):
+    """BERTScore F1, scaled x100. It embeds both sides with a multilingual model and matches
+    each output word to its closest reference word, so paraphrases are not punished as hard as
+    BLEU punishes them. The corpus number here is the mean of the per-sentence F1s."""
     from bert_score import score as bertscore_fn  # imported here so it stays optional
 
     P, R, F1 = bertscore_fn(hyps, refs, model_type=model_type, verbose=False)
@@ -38,6 +44,10 @@ def bert_score_arabic(hyps, refs, model_type):
 
 
 def rescore_cell(pred_path, do_bertscore, bertscore_model, write):
+    """Score one cell's saved predictions and return its summary row.
+
+    A "cell" is one model / variant / latency folder. With --write, the new scores are also
+    stored back into that folder's prediction.json and results.json."""
     preds = load_json(pred_path)
     hyps = [p["prediction"] for p in preds]
     refs = [p["reference"] for p in preds]
@@ -54,6 +64,8 @@ def rescore_cell(pred_path, do_bertscore, bertscore_model, write):
             p["BERTScore_F1"] = s
         row["BERTScore_F1"] = bs_corpus
 
+    # Write the per-sentence scores back into prediction.json, and merge the corpus scores into
+    # results.json without dropping the metrics that are already in there.
     if write:
         with open(pred_path, "w", encoding="utf-8") as f:
             json.dump(preds, f, ensure_ascii=False, indent=4)
@@ -72,6 +84,7 @@ def rescore_cell(pred_path, do_bertscore, bertscore_model, write):
 
 
 def main():
+    """Pick the cells to re-score, score each one, and print them as a table."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--results_root", default="results/granularity_comparison_alldomains")
     parser.add_argument("--cell", default=None,
@@ -86,6 +99,7 @@ def main():
                          help="Update each cell's prediction.json + results.json in place")
     args = parser.parse_args()
 
+    # One named cell, or every model/variant/latency folder under the results root.
     if args.cell:
         pred_paths = [os.path.join(args.results_root, args.cell, "prediction.json")]
     elif args.all:

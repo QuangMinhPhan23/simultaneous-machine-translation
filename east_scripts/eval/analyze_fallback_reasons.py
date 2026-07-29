@@ -17,6 +17,8 @@ for chunker in CHUNKERS:
 
     print(f"{chunker}: {len(entries)} entries")
 
+    # Current files record one reason per latency level, so count fallbacks separately for each.
+    # A reason of None means that latency was chunked successfully by the LLM.
     if entries and "fallback_reason_by_latency" in entries[0]:
         for latency in LATENCIES:
             fallback_reasons = Counter()
@@ -30,6 +32,7 @@ for chunker in CHUNKERS:
             for reason, count in fallback_reasons.most_common():
                 print(f"    {reason}: {count} ({count / n_fallback:.1%} of fallbacks)")
     else:
+        # Older files only have one flag and one reason for the whole entry.
         fallback_entries = [e for e in entries if e["fallback"]]
         reasons = Counter(e.get("fallback_reason", "unknown") for e in fallback_entries)
         print(f"  (legacy single-reason schema, pre-dates per-latency validation) "

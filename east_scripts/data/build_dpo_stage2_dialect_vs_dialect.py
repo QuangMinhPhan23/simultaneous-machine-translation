@@ -21,14 +21,18 @@ if __name__ == "__main__":
     parser.add_argument("--output", default="data/mt_data/dpo_data/stage2_pairs.json")
     args = parser.parse_args()
 
+    # Step 1: load the training data and keep only the offline rows, whose "output" is a
+    # plain sentence rather than an interleaved chunk string.
     with open(args.data_path, "r", encoding="utf-8") as f:
         examples = json.load(f)
     examples = [ex for ex in examples if "latency" not in ex]  # OMT rows only
 
+    # Step 2: for each sentence, swap its dialect markers to make the rejected side.
     pairs = []
     for ex in examples:
         chosen = ex["output"].strip()
         rejected, n_hits = swap_dialect(chosen, args.src_dialect, args.dst_dialect)
+        # Nothing was swapped, so the two sides would be identical.
         if n_hits == 0:
             continue
         pairs.append({
@@ -37,6 +41,7 @@ if __name__ == "__main__":
             "rejected": rejected,
         })
 
+    # Step 3: write the pairs out, ready for DPO training.
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(pairs, f, ensure_ascii=False, indent=2)

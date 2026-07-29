@@ -30,6 +30,11 @@ DEFAULT_LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_pro
 
 
 class AlpacaSFTDataset(Dataset):
+    """Turns Alpaca-style rows (instruction / input / output) into token ids for training.
+
+    Each row becomes one chat turn: the user side is the instruction, the answer side is the
+    translation with its read/write markers that we want the model to learn to produce."""
+
     def __init__(self, examples, tokenizer, cutoff_len, eot_token):
         self.examples = examples
         self.tokenizer = tokenizer
@@ -40,11 +45,14 @@ class AlpacaSFTDataset(Dataset):
         return len(self.examples)
 
     def __getitem__(self, idx):
+        """Tokenize one example and mask the prompt so the loss only sees the answer."""
         ex = self.examples[idx]
         user_content = ex["instruction"]
         if ex.get("input"):
             user_content = f"{user_content}\n{ex['input']}"
 
+        # Wrap the instruction in the model's own chat format, then append the target answer
+        # and the turn-end token so the model learns where to stop.
         prompt_text = self.tokenizer.apply_chat_template(
             [{"role": "user", "content": user_content}],
             tokenize=False,
@@ -56,6 +64,8 @@ class AlpacaSFTDataset(Dataset):
         full_ids = self.tokenizer(full_text, add_special_tokens=False).input_ids
         full_ids = full_ids[: self.cutoff_len]
 
+        # -100 is the "ignore me" label id. Setting it on every prompt token means the model is
+        # only scored on the answer it has to generate, not on the instruction it was given.
         labels = list(full_ids)
         prompt_len = min(len(prompt_ids), len(full_ids))
         for i in range(prompt_len):
@@ -65,6 +75,10 @@ class AlpacaSFTDataset(Dataset):
 
 
 def make_collate_fn(pad_token_id):
+    """Builds the batching function: pads every sequence in a batch to the longest one.
+
+    Padded positions get label -100 and attention 0, so they contribute nothing."""
+
     def collate(batch):
         max_len = max(len(item["input_ids"]) for item in batch)
         input_ids, labels, attention_mask = [], [], []
@@ -82,6 +96,7 @@ def make_collate_fn(pad_token_id):
 
 
 def main():
+    """Runs the whole Stage II job: load model, attach LoRA, train, then save the result."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_path", required=True,
                          help="A Stage-I checkpoint, e.g. biaofu-xmu/EAST-8B")
@@ -116,11 +131,16 @@ def main():
 
     random.seed(args.seed)
 
+    # Step 1: load the tokenizer and make the turn-end token the EOS, so training and later
+    # generation agree on where an answer stops.
     tokenizer = AutoTokenizer.from_pretrained(args.model_path, use_fast=True, trust_remote_code=True)
     tokenizer.add_special_tokens({"eos_token": args.eot_token})
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
+    # Step 2: load the Stage-I model in bfloat16 to halve the memory of float32. Gradient
+    # checkpointing recomputes activations during the backward pass instead of storing them,
+    # which is slower but fits a much bigger model on one GPU.
     model = AutoModelForCausalLM.from_pretrained(
         args.model_path,
         trust_remote_code=True,
@@ -129,6 +149,10 @@ def main():
     )
     model.gradient_checkpointing_enable()
 
+    # Step 3: attach the LoRA adapter. The base weights stay frozen; instead, a small pair of
+    # low-rank matrices is added next to each target projection (the attention q/k/v/o and the
+    # MLP gate/up/down layers) and only those are trained. print_trainable_parameters() shows how
+    # few weights that is compared with the full model.
     lora_config = LoraConfig(
         r=args.lora_rank,
         lora_alpha=args.lora_alpha,
@@ -139,6 +163,8 @@ def main():
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
+    # Step 4: load the training file and shuffle it, so the different latency levels and domains
+    # are mixed instead of arriving in blocks.
     with open(args.data_path, "r", encoding="utf-8") as f:
         examples = json.load(f)
     random.shuffle(examples)
@@ -148,6 +174,8 @@ def main():
 
     dataset = AlpacaSFTDataset(examples, tokenizer, args.cutoff_len, args.eot_token)
 
+    # Step 5: decide whether checkpoints go to the HF Hub. Without a token the push is switched
+    # off rather than failing later.
     push_to_hub = bool(args.hub_repo_id)
     if push_to_hub and not os.environ.get("HF_TOKEN"):
         print("WARNING: --hub_repo_id/HF_REPO_ID set but $HF_TOKEN is not -- disabling auto-push.", file=sys.stderr)
@@ -155,6 +183,9 @@ def main():
     # Adapter-only mode pushes one small adapter at the end, so the Trainer's own pushes are off.
     trainer_push = push_to_hub and not args.adapter_only
 
+    # Step 6: training settings. The effective batch size is per_device_train_batch_size x
+    # gradient_accumulation_steps, i.e. gradients from several small batches are summed before
+    # one weight update. Cosine schedule with a warmup ramp, and a checkpoint every save_steps.
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         per_device_train_batch_size=args.per_device_train_batch_size,
@@ -177,6 +208,10 @@ def main():
         hub_private_repo=True,
     )
 
+    # Step 7: the training loop itself. Trainer repeatedly takes a batch, runs it through the
+    # model, compares the predicted next token with the label at each answer position, and
+    # updates the LoRA weights. If the output dir already holds a checkpoint it picks up there,
+    # so a job killed by the walltime limit can just be resubmitted.
     trainer = Trainer(
         model=model,
         args=training_args,
@@ -189,6 +224,8 @@ def main():
         print(f"Resuming from checkpoint: {last_checkpoint}")
     trainer.train(resume_from_checkpoint=last_checkpoint)
 
+    # Step 8a: adapter-only mode. Save just the small LoRA weights; eval has to load the base
+    # model and apply them on top.
     if args.adapter_only:
         adapter_dir = f"{args.output_dir.rstrip('/')}/adapter"
         print(f"Saving LoRA adapter (not merged) to {adapter_dir}")
@@ -208,6 +245,8 @@ def main():
         print("Done.")
         return
 
+    # Step 8b: default mode. Fold the LoRA weights back into the base weights, giving one
+    # ordinary model directory that eval can load without knowing about LoRA at all.
     merged_dir = f"{args.output_dir.rstrip('/')}/merged"
     print(f"Merging LoRA adapter and saving to {merged_dir}")
     merged_model = model.merge_and_unload()

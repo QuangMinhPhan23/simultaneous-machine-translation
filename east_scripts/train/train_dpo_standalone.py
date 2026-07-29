@@ -32,6 +32,11 @@ LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_
 
 
 def main():
+    """Runs one DPO stage: load the checkpoint, attach LoRA, train on preference pairs, merge.
+
+    DPO learns from pairs, not from single answers. For every prompt it sees a "chosen" and a
+    "rejected" answer, and it shifts probability towards the chosen one while a reference copy of
+    the model holds it back from drifting too far. beta controls how strong that leash is."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_path", required=True,
                          help="Base checkpoint, or the previous stage's merged output, e.g. "
@@ -66,17 +71,22 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
+    # Step 1: load the tokenizer and make sure the turn-end token is the EOS.
     tokenizer = AutoTokenizer.from_pretrained(args.model_path, use_fast=True, trust_remote_code=True)
     if EOT_TOKEN in tokenizer.get_vocab() and tokenizer.eos_token != EOT_TOKEN:
         tokenizer.eos_token = EOT_TOKEN  # EAST-8B ships the token but does not set it as eos
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
+    # Step 2: load the checkpoint in bfloat16. Gradient checkpointing recomputes activations in
+    # the backward pass instead of storing them, trading speed for memory.
     model = AutoModelForCausalLM.from_pretrained(
         args.model_path, trust_remote_code=True, torch_dtype=torch.bfloat16, low_cpu_mem_usage=True,
     )
     model.gradient_checkpointing_enable()
 
+    # Step 3: the LoRA settings handed to DPOTrainer below. The base weights stay frozen and only
+    # small low-rank matrices next to the attention q/k/v/o and MLP gate/up/down layers are trained.
     lora_config = LoraConfig(
         r=args.lora_rank,
         lora_alpha=args.lora_alpha,
@@ -85,6 +95,8 @@ def main():
         task_type="CAUSAL_LM",
     )
 
+    # Step 4: load the preference pairs and put each one into the model's chat format. trl expects
+    # the three fields prompt / chosen / rejected.
     with open(args.data_path, "r", encoding="utf-8") as f:
         pairs = json.load(f)
     if args.max_examples:
@@ -92,6 +104,7 @@ def main():
     print(f"Training on {len(pairs)} preference pairs")
 
     def to_chat_example(ex):
+        """Wrap one pair in the chat template and append the turn-end token to both answers."""
         return {
             "prompt": tokenizer.apply_chat_template(
                 [{"role": "user", "content": ex["prompt"]}],
@@ -104,6 +117,8 @@ def main():
 
     dataset = Dataset.from_list([to_chat_example(ex) for ex in pairs])
 
+    # Step 5: assemble the DPO config. Because trl's field names move between releases, the
+    # optional ones below are only added when the installed version actually accepts them.
     dpo_kwargs = dict(
         output_dir=args.output_dir,
         per_device_train_batch_size=args.per_device_train_batch_size,
@@ -163,9 +178,14 @@ def main():
             "-- check `pip show trl` and this script's trl version assumptions"
         )
 
+    # Step 6: the training loop. For each batch DPOTrainer scores the chosen and the rejected
+    # answer under both the model and the reference, and updates the LoRA weights so the gap
+    # favours the chosen one.
     trainer = DPOTrainer(**trainer_kwargs)
     trainer.train()
 
+    # Step 7: fold the LoRA weights into the base weights, so the next stage (or eval) can load
+    # this directory as an ordinary model.
     merged_dir = f"{args.output_dir.rstrip('/')}/merged"
     print(f"Merging LoRA adapter and saving to {merged_dir}")
     merged_model = trainer.model.merge_and_unload()

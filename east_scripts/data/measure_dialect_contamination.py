@@ -17,6 +17,7 @@ if __name__ == "__main__":
     parser.add_argument("--dialect", default="EG")
     args = parser.parse_args()
 
+    # Step 1: collect the MSA words to look for, which are the values of the dialect table.
     table = DIALECT_TO_MSA_TABLES.get(args.dialect)
     if table is None:
         raise ValueError(f"No MSA table for dialect {args.dialect!r}")
@@ -25,6 +26,7 @@ if __name__ == "__main__":
     with open(args.predictions_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
+    # Step 2: count a prediction as contaminated if it shares any whole word with that set.
     n_contaminated = 0
     for row in data:
         pred = row.get("prediction", "")

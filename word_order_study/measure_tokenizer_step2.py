@@ -35,6 +35,10 @@ TOKENIZER_CANDIDATES = [
 
 
 def load_tokenizer():
+    """Return the first candidate tokenizer that loads.
+
+    The official repo is gated, so it only works with an HF token; otherwise the identical
+    ungated mirror is used. Both have the same 128k vocabulary."""
     last = None
     for m in TOKENIZER_CANDIDATES:
         try:
@@ -47,12 +51,17 @@ def load_tokenizer():
 
 
 def read_lines(path, n):
+    """Read at most n non-blank lines from a file."""
     with open(path, encoding="utf-8") as f:
         lines = [ln.rstrip("\n") for ln in f if ln.strip()]
     return lines[:n]
 
 
 def measure(tok, texts):
+    """Tokenize a list of sentences and return the fertility numbers for them.
+
+    Totals are summed over all the sentences first, then divided, so long sentences count more
+    than short ones. Words are whitespace-split."""
     chars = sum(len(t) for t in texts)
     words = sum(len(t.split()) for t in texts)
     toks = sum(len(tok.encode(t, add_special_tokens=False)) for t in texts)
@@ -73,8 +82,11 @@ def main():
     ap.add_argument("--split", default="train")
     args = ap.parse_args()
 
+    # Step 1: load the tokenizer once and reuse it for every language.
     tok = load_tokenizer()
 
+    # Step 2: measure both sides of each language's split. The English side is the same kind of
+    # text everywhere, so it acts as a reference the target numbers can be read against.
     tgt_rows, src_rows = [], []
     for name, ext, script in LANGS:
         tgt = read_lines(os.path.join(DATA, name, f"{args.split}.{ext}"), args.n)
@@ -82,6 +94,7 @@ def main():
         tgt_rows.append((name, script, measure(tok, tgt)))
         src_rows.append((name, measure(tok, src)))
 
+    # Step 3: turn the two sets of rows into markdown tables.
     def fmt_target():
         L = ["## Target side (Llama-3-8B-Instruct tokenizer)", "",
              "| Language | Script | n | chars/token | tokens/sentence | tokens/word | chars/sentence |",
@@ -100,7 +113,7 @@ def main():
                      f"{s['tokens_per_word']:.3f} |")
         return "\n".join(L)
 
-    # AL-inflation index: tokens/sentence relative to the least-fragmented language
+    # Step 4: AL-inflation index - tokens/sentence relative to the least-fragmented language.
     min_tps = min(s["tokens_per_sent"] for _, _, s in tgt_rows)
     idx = ["## Token-based AL inflation index (target tokens/sentence ÷ lowest)",
            "",
@@ -112,6 +125,7 @@ def main():
     for name, script, s in tgt_rows:
         idx.append(f"| {name} | {s['tokens_per_sent']:.1f} | {s['tokens_per_sent']/min_tps:.2f}x |")
 
+    # Step 5: print the report and save the same text as a markdown file.
     out = "# Step 2 - Tokenizer Fertility\n\n" + fmt_target() + "\n\n" + fmt_source() + "\n\n" + "\n".join(idx) + "\n"
     print(out)
     with open(os.path.join(DATA, "tokenizer_fertility.md"), "w", encoding="utf-8", newline="\n") as f:

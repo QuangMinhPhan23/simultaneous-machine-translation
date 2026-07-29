@@ -44,6 +44,7 @@ LB_TO_MSA = {
 }
 
 # EG <-> LB swap, built from the two tables above via the MSA gloss they share.
+# Only words that both dialects have an entry for can be swapped.
 _SHARED_GLOSSES = set(EG_TO_MSA.values()) & set(LB_TO_MSA.values())
 _EG_BY_GLOSS = {gloss: word for word, gloss in EG_TO_MSA.items()}
 _LB_BY_GLOSS = {gloss: word for word, gloss in LB_TO_MSA.items()}
@@ -62,6 +63,8 @@ def _substitute(text, table):
         return text, 0
     n_hits = 0
     for src in sorted(table, key=len, reverse=True):
+        # The lookarounds require whitespace (or a string edge) on both sides, so the word is
+        # only replaced when it stands alone and not inside a longer word.
         pattern = r"(?<!\S)" + re.escape(src) + r"(?!\S)"
         text, n = re.subn(pattern, table[src], text)
         n_hits += n

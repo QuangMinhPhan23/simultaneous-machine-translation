@@ -16,6 +16,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 def main():
+    """Translates every offline example in --data_path with the given checkpoint and saves
+    the model's output next to the human reference."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_path", required=True)
     parser.add_argument("--data_path", required=True,
@@ -27,6 +29,7 @@ def main():
     parser.add_argument("--max_examples", type=int, default=None)
     args = parser.parse_args()
 
+    # Step 1: load the tokenizer and work out which token ids should stop generation.
     tokenizer = AutoTokenizer.from_pretrained(args.model_path, use_fast=True, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -39,6 +42,7 @@ def main():
             eos_token_ids.add(turn_end_id)
     eos_token_ids = list(eos_token_ids)
 
+    # Step 2: load the checkpoint onto the GPU and put it in inference mode.
     model = AutoModelForCausalLM.from_pretrained(
         args.model_path, trust_remote_code=True, torch_dtype=torch.bfloat16, low_cpu_mem_usage=True,
     )
@@ -46,6 +50,7 @@ def main():
         model.cuda()
     model.eval()
 
+    # Step 3: load the examples and keep only the offline rows, skipping the SiMT ones.
     with open(args.data_path, "r", encoding="utf-8") as f:
         examples = json.load(f)
     examples = [ex for ex in examples if "latency" not in ex]
@@ -53,10 +58,12 @@ def main():
         examples = examples[: args.max_examples]
     print(f"Generating candidates for {len(examples)} OMT examples")
 
+    # Step 4: translate the examples one at a time with beam search.
     device = "cuda" if torch.cuda.is_available() else "cpu"
     results = []
     with torch.no_grad():
         for ex in tqdm(examples):
+            # The instruction and the source sentence go into the prompt as one user turn.
             user_content = ex["instruction"]
             if ex.get("input"):
                 user_content = f"{user_content}\n{ex['input']}"
@@ -75,6 +82,7 @@ def main():
                 pad_token_id=tokenizer.pad_token_id,
                 eos_token_id=eos_token_ids,
             )
+            # Keep only the newly generated tokens, not the prompt echoed back.
             generated = output_ids[0][inputs.input_ids.shape[1]:]
             prediction = tokenizer.decode(generated, skip_special_tokens=True).strip()
 
@@ -87,6 +95,7 @@ def main():
                 "tgt_lang": ex.get("tgt_lang"),
             })
 
+    # Step 5: save reference and prediction side by side, for a DPO stage builder to use.
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)

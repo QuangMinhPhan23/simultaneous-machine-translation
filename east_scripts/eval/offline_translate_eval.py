@@ -22,6 +22,10 @@ ACEGPT_AR_SYSTEM = "أنت مساعد مفيد ومحترم وصادق."
 
 
 def build_prompt(tokenizer, prompt_style, src_lang, tgt_lang, source):
+    """Wrap one sentence in the prompt format the chosen model expects.
+
+    Models differ: some ship a chat template, others need their tags written out by hand, and
+    older Arabic models use the Llama-2 [INST] or Alpaca layout."""
     instruction = INSTRUCTION.format(src_lang=src_lang, tgt_lang=tgt_lang)
 
     if prompt_style == "chat_template":
@@ -45,6 +49,7 @@ def build_prompt(tokenizer, prompt_style, src_lang, tgt_lang, source):
 
 
 def main():
+    """Translate the whole test set in one shot per sentence, then score it."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_path", required=True)
     parser.add_argument("--data_path", required=True)
@@ -60,6 +65,7 @@ def main():
                          help="Optional; omit to skip COMET")
     args = parser.parse_args()
 
+    # Step 1: load the tokenizer and collect every id that should stop generation.
     tokenizer = AutoTokenizer.from_pretrained(args.model_path, use_fast=True, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -73,6 +79,7 @@ def main():
             eos_token_ids.add(turn_end_id)
     eos_token_ids = list(eos_token_ids)
 
+    # Step 2: load the model in bfloat16 and put it in eval mode (no dropout, no gradients).
     model = AutoModelForCausalLM.from_pretrained(
         args.model_path, trust_remote_code=True, torch_dtype=torch.bfloat16, low_cpu_mem_usage=True,
     )
@@ -88,6 +95,8 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     predictions = []
 
+    # Step 3: translate each sentence in one pass, with 5-beam search and no sampling. The prompt
+    # tokens are stripped off the output so only the model's own answer is kept.
     with torch.no_grad():
         for sample in tqdm(data):
             prompt = build_prompt(tokenizer, args.prompt_style, sample["src_lang"], sample["tgt_lang"], sample["source"])
@@ -113,6 +122,8 @@ def main():
                 }
             )
 
+    # Step 4: corpus BLEU over the whole test set. It counts how many word n-grams the output
+    # shares with the reference.
     hypos = [p["prediction"] for p in predictions]
     refs = [p["reference"] for p in predictions]
     bleu = sacrebleu.corpus_bleu(hypos, [refs], tokenize="13a").score
@@ -122,6 +133,7 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     def save():
+        """Write both output files; called again after COMET so the scores get added."""
         with open(os.path.join(args.output_dir, "predictions.json"), "w", encoding="utf-8") as f:
             json.dump(predictions, f, ensure_ascii=False, indent=2)
         with open(os.path.join(args.output_dir, "results.json"), "w", encoding="utf-8") as f:
@@ -130,6 +142,8 @@ def main():
     # Save before COMET so a scoring crash never throws away the generation.
     save()
 
+    # Step 5: optional COMET. It is a trained neural scorer that reads source, output and
+    # reference together and predicts a human-like quality score.
     if args.comet_ckpt_path:
         try:
             from comet import load_from_checkpoint
@@ -144,6 +158,8 @@ def main():
         except Exception as e:
             print(f"WARNING: COMET scoring failed ({e}); BLEU + predictions were already saved.")
 
+    # Step 6: print the scores plus the first three translations, so a broken prompt format is
+    # obvious straight away.
     print(json.dumps(results, ensure_ascii=False, indent=2))
     for p in predictions[:3]:
         print("SRC:", p["source"])

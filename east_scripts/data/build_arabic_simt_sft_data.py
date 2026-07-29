@@ -46,6 +46,8 @@ DIALECT_NAMES = {
 
 
 def _split_into_k_chunks(words, k):
+    """Cuts a word list into k pieces of almost equal length and joins each piece back
+    into a string."""
     n = len(words)
     return [" ".join(words[(i * n) // k:((i + 1) * n) // k]) for i in range(k)]
 
@@ -58,12 +60,14 @@ def chunk_sentence_pair(source, target, chunk_size):
     source_words, target_words = source.split(), target.split()
     if not source_words or not target_words:
         return [], []
+    # Round up the longer side to get K, then clamp so neither side gets empty chunks.
     k = max(1, -(-max(len(source_words), len(target_words)) // chunk_size))
     k = min(k, len(source_words), len(target_words))
     return _split_into_k_chunks(source_words, k), _split_into_k_chunks(target_words, k)
 
 
 def whole_sentence_chunk(text):
+    """Wraps a sentence as a single chunk, or gives an empty list if the text is blank."""
     text = text.strip()
     return [text] if text else []
 
@@ -79,6 +83,8 @@ def load_precomputed_chunks(path):
 
 
 def align_chunks(source_chunks, target_chunks):
+    """Forces both sides to have the same number of chunks by merging the extra chunks on
+    the longer side into its last chunk. Interleaving needs the counts to match."""
     source_chunks, target_chunks = list(source_chunks), list(target_chunks)
     while len(source_chunks) > len(target_chunks) and len(source_chunks) > 1:
         last = source_chunks.pop()
@@ -103,6 +109,8 @@ def interleave_chunks(source_chunks, target_chunks):
 
 
 def build_simt_output(source, target, chunk_words=None, fixed_chunks=None):
+    """Produces the interleaved training string for one sentence pair. Uses fixed_chunks when
+    a segmentation is supplied, otherwise falls back to the word-count split."""
     if fixed_chunks is not None:
         source_chunks, target_chunks = fixed_chunks
         source_chunks, target_chunks = align_chunks(source_chunks, target_chunks)
@@ -123,6 +131,8 @@ def build_examples(source, target, src_lang, tgt_lang, granularity="chunk", prec
         # --chunks_path was given but this turn has no entry, so count the miss.
         stats["fallback_to_heuristic"] = stats.get("fallback_to_heuristic", 0) + 1
 
+    # One SiMT example per latency level. Where the chunk boundaries come from depends on
+    # the granularity and on whether this turn has a precomputed entry.
     for latency, chunk_words in LATENCY_CHUNK_WORDS.items():
         fixed_chunks = None
         if granularity == "turn":
@@ -145,6 +155,7 @@ def build_examples(source, target, src_lang, tgt_lang, granularity="chunk", prec
             }
         )
 
+    # The offline example has no chunking at all: full source in, full target out.
     examples.append(
         {
             "instruction": OMT_INSTRUCTION.format(src_lang=src_lang, tgt_lang=tgt_lang),
@@ -183,6 +194,11 @@ def build_dataset(country, split, direction, granularity="chunk", chunks_path=No
                   domain=None, upweight_domain=None, domain_weight=1,
                   register_filter="none", max_msa_markers=0, min_dialectness=0.4,
                   register_min_words=0, register_action="drop", downweight_keep_frac=0.0, seed=0):
+    """Turns one Alexandria dialect split into the full list of training examples.
+
+    Walks every conversation turn, optionally filters by domain and by dialect register,
+    then builds the SiMT and offline examples for the turns that survive."""
+    # Step 1: load the split and, if asked, keep only one conversation domain.
     dataset = load_dataset("UBC-NLP/alexandria", name=country, split=split)
     if domain is not None:
         dataset = dataset.filter(lambda x: x["domain"] == domain)
@@ -195,6 +211,7 @@ def build_dataset(country, split, direction, granularity="chunk", chunks_path=No
     pairs = []
     for conv in dataset:
         conv_id = conv["conv_id"]
+        # How many copies of this conversation's turns to emit later, for domain upweighting.
         repeat = domain_weight if (upweight_domain is not None and conv.get("domain") == upweight_domain) else 1
         for turn_idx, (eng_turn, dia_turn) in enumerate(zip(conv["english_conversation"], conv["dialectal_conversation"])):
             eng_text = eng_turn["text"].strip()
@@ -202,6 +219,7 @@ def build_dataset(country, split, direction, granularity="chunk", chunks_path=No
             if not eng_text or not dia_text:
                 continue
 
+            # The direction decides which language is the source and which is the target.
             if direction == "en2ar":
                 source, target, src_lang, tgt_lang = eng_text, dia_text, "English", tgt_dialect_name
             else:
@@ -214,7 +232,7 @@ def build_dataset(country, split, direction, granularity="chunk", chunks_path=No
                 "dialectal_text": dia_text, "precomputed_entry": precomputed_entry, "repeat": repeat,
             })
 
-    # Register-filter scoring (on the Arabic side), then keep/drop or downweight.
+    # Step 2: register-filter scoring (on the Arabic side), then keep/drop or downweight.
     n_reg_dropped = 0
     if register_filter != "none":
         keep_flags, reg_scores = _register_keep_flags(
@@ -237,6 +255,7 @@ def build_dataset(country, split, direction, granularity="chunk", chunks_path=No
                 p["_reg_keep"] = False
             if not p["_reg_keep"]:
                 n_reg_dropped += 1
+        # Report how much the filter removed, so the effect on data size is visible in the log.
         gate_note = f" ({n_short_exempt} short turns < {register_min_words} words exempted)" if register_min_words else ""
         if register_filter == "aldi":
             kept_scores = [p["_reg_score"] for p in pairs if p["_reg_keep"]]
@@ -259,10 +278,12 @@ def build_dataset(country, split, direction, granularity="chunk", chunks_path=No
         exs = build_examples(p["source"], p["target"], p["src_lang"], p["tgt_lang"],
                              granularity=granularity, precomputed_entry=p["precomputed_entry"], stats=stats)
         all_examples.extend(exs)
+        # repeat > 1 only for the upweighted domain: append the same examples again.
         for _ in range(p["repeat"] - 1):
             all_examples.extend(exs)
             n_upweighted += len(exs)
 
+    # Step 3: report how well the precomputed chunks covered the data and how much was duplicated.
     if chunks_path:
         n_fallback = stats["fallback_to_heuristic"]
         n_total = stats["total_turns"]
@@ -327,6 +348,7 @@ if __name__ == "__main__":
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(examples, f, ensure_ascii=False, indent=2)
 
+    # SiMT rows are the ones carrying a "latency" key; everything else is an offline row.
     n_simt = sum(1 for ex in examples if "latency" in ex)
     n_omt = len(examples) - n_simt
     print(f"Wrote {len(examples)} examples ({n_simt} SiMT, {n_omt} OMT) to {args.output}")
