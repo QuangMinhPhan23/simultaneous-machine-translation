@@ -315,6 +315,9 @@ class SimulInference:
         src_lang = sample["src_lang"]
         tgt_lang = sample["tgt_lang"]
 
+        # The prompt is a single user turn naming the language pair and the latency level. Source
+        # words and translation chunks are appended to this same string as the loop runs, so the
+        # model always sees everything that happened so far.
         instruction = self.instruction.format(src_lang=src_lang, tgt_lang=tgt_lang, latency=self.latency)
         messages = [{"role": "user", "content": instruction}]
 
@@ -324,23 +327,32 @@ class SimulInference:
             add_generation_prompt=True,
         )
 
+        # Nothing has been fed to the model yet, so there is no cache to reuse.
         past_key_values = None
 
+        # The source is revealed one unit at a time: characters for Chinese, whitespace words
+        # otherwise. This list is what "how much has been read so far" is measured in.
         if src_lang == "Chinese":
             src_tokens = tokenize_chinese(src_text, self.tokenizer)
         else:
             src_tokens = src_text.split()
 
+        # input_text is the running transcript that is fed back to the model every step, and the
+        # loop always starts in the READ phase.
         input_text = prompt
         is_read = True
 
+        # Loop state: idx counts revealed source units, read_tok_num counts the units read since
+        # the last write, read_chunk collects them, read_contents keeps one joined entry per write,
+        # and preds collects the written translation chunks.
         idx = 0
         preds = []
         read_tok_num = 0
         read_contents = []
         read_chunk = []
 
-        # Loop until the source is used up AND no write is still in progress.
+        # One read step or one write step per pass. The loop ends only when every source unit has
+        # been revealed and the model is not in the middle of a write, so nothing is left owed.
         while idx < len(src_tokens) or (not is_read):
             if is_read:
                 # READ: reveal the next source word and let the model answer with one token.
@@ -365,6 +377,8 @@ class SimulInference:
                 read_chunk = []
                 self.prepare_write_kwargs(read_tok_num)
 
+            # The whole transcript is re-tokenized every step, but the cache means only the newly
+            # added tokens are actually pushed through the model.
             model_inputs = self.tokenizer([input_text], add_special_tokens=False, return_tensors="pt").to(self.device)
 
             model_output = self.model.generate(
@@ -377,8 +391,11 @@ class SimulInference:
             )
 
             generated_ids = model_output.sequences
+            # Greedy search keeps a single sequence, so the returned cache needs no reshaping and
+            # is passed straight into the next step.
             past_key_values = model_output.past_key_values
 
+            # Drop the input part of the sequence, keeping only the tokens generated just now.
             generated_ids = [
                 output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
             ]
@@ -387,13 +404,16 @@ class SimulInference:
             # Treat a plain EOS as an end-of-write, so both endings are handled the same way.
             response = response.replace(self.eos_token, self.eow_token)
 
-            # Decide what just happened and what the next step should be.
+            # Decide what just happened and what the next step should be. If no branch matches, the
+            # read step did not produce the end-of-read marker, so nothing changes and the next
+            # pass simply reveals one more source word.
             if is_read and self.eor_token in response:
                 # The model asked to stop reading: switch to writing.
                 is_read = False
                 input_text = f"{input_text}{response}"
             elif not is_read and (self.eow_token in response or generated_ids[0].size(0) >= self.gen_kwargs["max_new_tokens"]):
                 # A translation chunk finished (or hit its token budget): keep it and read again.
+                # The marker is stripped from the stored chunk but kept in the transcript.
                 hypo = response.rstrip().replace(self.eow_token, "")
                 if self.eow_token not in response:
                     response = f"{response}{self.eow_token}"
@@ -444,6 +464,8 @@ class SimulInference:
         ALs = []
         LAALs = []
 
+        # Step 1: one sentence at a time. Each sentence gets its own BLEU and its own latency
+        # numbers, and its output and reference are collected for the corpus scores further down.
         for prediction in self.predictions:
             translation = prediction["prediction"]
             ref = prediction["reference"]
@@ -464,6 +486,8 @@ class SimulInference:
                 tok = "13a"
                 ref_len = len(ref.split())
 
+            # The source is counted the same way, because AL and LAAL are both expressed in
+            # source units and need to know how long the whole input was.
             if src_lang == "Chinese":
                 src_len = len(list(prediction["source"]))
             else:
@@ -472,6 +496,8 @@ class SimulInference:
             bleu = sacrebleu.sentence_bleu(translation, [ref], tokenize=tok).score
 
             # delays[i] = how many source words had been read when output word i was produced.
+            # read_contents[i] is the source taken in just before chunk i was written, and
+            # compute_delays adds those lengths up to get the running total.
             delays, _ = compute_delays(read_contents, hypo, src_lang, tgt_lang)
             AL = AverageLagging(delays, src_len, ref_len)
             LAAL = LengthAdaptiveAverageLagging(delays, src_len, ref_len)
@@ -479,20 +505,23 @@ class SimulInference:
             ALs.append(AL)
             LAALs.append(LAAL)
 
+            # Keep the per-sentence numbers on the prediction, so they end up in prediction.json.
             prediction["delays"] = str(delays)
             prediction["BLEU"] = bleu
             prediction["AL"] = AL
             prediction["LAAL"] = LAAL
 
-        # Corpus scores are computed over the whole test set at once, which is the number
-        # reported in the results table (not the mean of the per-sentence BLEUs above).
+        # Step 2: corpus scores, computed over the whole test set at once. These are the numbers
+        # reported in the results table, not the mean of the per-sentence BLEUs above. The whole
+        # test set shares one target language, so the tokenizer is picked from the first row.
         tok = "zh" if self.predictions[0]["tgt_lang"] == "Chinese" else "13a"
 
         bleu_score = sacrebleu.corpus_bleu(hypos, [refs], tokenize=tok).score
 
-        # All three surface metrics at once (CPU only), so no separate rescoring
-        # pass is needed later. spBLEU uses the flores200 SentencePiece tokenizer.
         results["BLEU"] = bleu_score
+        # spBLEU is BLEU measured after the flores200 SentencePiece tokenizer, which cuts words
+        # into subwords, so the score is comparable across languages that split words differently.
+        # It needs a downloaded model, so a failure here only blanks this one metric.
         try:
             results["spBLEU"] = sacrebleu.corpus_bleu(
                 hypos, [refs], tokenize="flores200"
@@ -502,6 +531,7 @@ class SimulInference:
             results["spBLEU"] = None
         results["chrF++"] = sacrebleu.corpus_chrf(hypos, [refs], word_order=2).score
 
+        # AL and LAAL are reported as the plain average of the per-sentence values above.
         results["AL"] = mean(ALs)
         results["LAAL"] = mean(LAALs)
 

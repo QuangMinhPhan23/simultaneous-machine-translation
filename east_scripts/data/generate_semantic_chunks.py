@@ -75,11 +75,14 @@ def _repair_json_brackets(candidate):
     """Fixes the two ways these models break their JSON: leaving off the outermost closing
     brace, and closing an array with '}' instead of ']'. Walks the text with a bracket
     stack, skipping string literals so brackets inside the chunk text are not counted."""
-    stack = []
+    stack = []  # brackets opened so far and not yet closed, innermost last
     in_string = False
     escape = False
     repaired = list(candidate)
     for i, ch in enumerate(repaired):
+        # Inside a quoted string nothing counts as a bracket. Arabic and English chunk text can
+        # contain any character, so brackets there must not touch the stack. The escape flag is
+        # needed so a \" inside a chunk is not read as the end of the string.
         if in_string:
             if escape:
                 escape = False
@@ -91,14 +94,20 @@ def _repair_json_brackets(candidate):
         if ch == '"':
             in_string = True
         elif ch in "{[":
+            # Remember the opener, so we know which closer belongs to it.
             stack.append(ch)
         elif ch in "}]":
+            # A closer with nothing open belongs to no opener, so leave the character as it is.
             if not stack:
                 continue
+            # Mismatched closer, for example a list closed with '}'. Overwrite it with the
+            # closer the innermost opener actually needs.
             expected_close = "}" if stack[-1] == "{" else "]"
             if ch != expected_close:
                 repaired[i] = expected_close
             stack.pop()
+    # Whatever is still on the stack was never closed - usually the outermost brace, which the
+    # model drops when it stops early. Close them innermost first so the nesting stays valid.
     for opener in reversed(stack):
         repaired.append("}" if opener == "{" else "]")
     return "".join(repaired)
@@ -152,6 +161,9 @@ def parse_chunk_response(response_text, source, target, min_similarity=DEFAULT_M
 
     A JSON parse failure fails all three, since there is nothing to salvage."""
     parsed = extract_json_object(response_text)
+    # No JSON object at all, even after the bracket repair: the model answered with prose, an
+    # empty string, or something too broken to read. All three latencies take the word-count
+    # split and share the same reason.
     if not isinstance(parsed, dict):
         chunks_by_latency = {
             latency: chunk_sentence_pair(source, target, words) for latency, words in LATENCY_CHUNK_WORDS.items()
@@ -167,11 +179,17 @@ def parse_chunk_response(response_text, source, target, min_similarity=DEFAULT_M
         entry = parsed.get(json_key)
         reason = None
         source_chunks = target_chunks = None
+        # The model sometimes answers with only one or two of the three latencies, or puts a
+        # string where the object should be.
         if not isinstance(entry, dict):
             reason = "missing_latency_key"
         else:
             source_chunks = entry.get("source_chunks")
             target_chunks = entry.get("target_chunks")
+            # Four things can still be wrong with the two lists: a key is missing or is not a
+            # list, a list is empty, an item is not a real string, or the chunks do not glue
+            # back into the original sentence because the model paraphrased, dropped, added, or
+            # reordered words instead of copying them.
             if not isinstance(source_chunks, list) or not isinstance(target_chunks, list):
                 reason = "missing_or_wrong_type_keys"
             elif not source_chunks or not target_chunks:
@@ -182,8 +200,11 @@ def parse_chunk_response(response_text, source, target, min_similarity=DEFAULT_M
                 reason = "reconstruction_mismatch"
 
         if reason is None:
+            # Accepted. The two sides can still differ in count, so align them before storing.
             chunks_by_latency[latency] = align_chunks(source_chunks, target_chunks)
         else:
+            # Rejected. Only this latency drops to the word-count split; the reason is kept so
+            # the caller can report why.
             chunks_by_latency[latency] = chunk_sentence_pair(source, target, chunk_words)
         fallback_by_latency[latency] = reason is not None
         reason_by_latency[latency] = reason
@@ -294,6 +315,8 @@ def main():
     generator = ChunkGenerator(model_path, min_similarity=args.min_reconstruction_similarity,
                                 debug_raw_responses=args.debug_raw_responses)
 
+    # Load the conversations. The dialect name goes into the prompt, so the model is told which
+    # kind of Arabic it is looking at.
     dataset = load_dataset("UBC-NLP/alexandria", name=args.country, split=args.split)
     tgt_dialect_name = DIALECT_NAMES.get(args.country, f"Arabic ({args.country})")
 
@@ -307,16 +330,19 @@ def main():
     for conv in dataset:
         conv_id = conv["conv_id"]
         for turn_idx, (eng_turn, dia_turn) in enumerate(zip(conv["english_conversation"], conv["dialectal_conversation"])):
+            # Stop early for a quick sanity check, and skip turns an earlier run already did.
             if args.max_examples and n_processed >= args.max_examples:
                 break
             if (conv_id, turn_idx) in done:
                 continue
 
+            # A turn is only usable when both sides carry text.
             eng_text = eng_turn["text"].strip()
             dia_text = dia_turn["text"].strip()
             if not eng_text or not dia_text:
                 continue
 
+            # The direction decides which language is the source and which is the target.
             if args.direction == "en2ar":
                 source, target, src_lang, tgt_lang = eng_text, dia_text, "English", tgt_dialect_name
             else:
@@ -333,6 +359,8 @@ def main():
                 fallback_by_latency = {latency: True for latency in LATENCY_CHUNK_WORDS}
                 reason_by_latency = {latency: f"generation_exception: {e}" for latency in LATENCY_CHUNK_WORDS}
 
+            # One record per turn: all three chunkings, plus which of them fell back and why.
+            # A turn counts as a fallback if even one latency failed.
             fallback = any(fallback_by_latency.values())
             entries.append({
                 "conv_id": conv_id,
@@ -347,6 +375,8 @@ def main():
                 "fallback_by_latency": fallback_by_latency,
                 "fallback_reason_by_latency": reason_by_latency,
             })
+            # Running tallies for the final report: one count per latency, and one per
+            # latency+reason pair so the common failure modes stand out.
             n_processed += 1
             n_fallback += int(fallback)
             for latency, reason in reason_by_latency.items():
@@ -361,6 +391,7 @@ def main():
                     json.dump(entries, f, ensure_ascii=False, indent=2)
                 print(f"  ...{n_processed} turns processed ({n_fallback} fallbacks so far)", file=sys.stderr)
 
+        # The inner break only leaves the turn loop, so check again to leave the conversation loop.
         if args.max_examples and n_processed >= args.max_examples:
             break
 

@@ -138,10 +138,13 @@ def build_examples(source, target, src_lang, tgt_lang, granularity="chunk", prec
         if granularity == "turn":
             fixed_chunks = (whole_sentence_chunk(source), whole_sentence_chunk(target))
         elif precomputed_entry is not None:
+            # This turn was chunked by the LLM, so take its segmentation for this latency.
             latency_entry = precomputed_entry["chunks"][latency]
             fixed_chunks = (latency_entry["source_chunks"], latency_entry["target_chunks"])
 
+        # If fixed_chunks is still None, build_simt_output splits by word count instead.
         output = build_simt_output(source, target, chunk_words=chunk_words, fixed_chunks=fixed_chunks)
+        # An empty side produces no chunks and no string, so skip that latency.
         if output is None:
             continue
         examples.append(
@@ -204,6 +207,8 @@ def build_dataset(country, split, direction, granularity="chunk", chunks_path=No
         dataset = dataset.filter(lambda x: x["domain"] == domain)
     tgt_dialect_name = DIALECT_NAMES.get(country, f"Arabic ({country})")
 
+    # The LLM chunks are optional. stats is passed down to build_examples, which fills in how
+    # many turns had no precomputed entry.
     precomputed_lookup = load_precomputed_chunks(chunks_path) if chunks_path else None
     stats = {"_chunks_path_set": chunks_path is not None, "fallback_to_heuristic": 0, "total_turns": 0}
 
@@ -266,6 +271,7 @@ def build_dataset(country, split, direction, granularity="chunk", chunks_path=No
             print(f"Register-filter (lexicon, <= {max_msa_markers} MSA markers{gate_note}): "
                   f"dropped {n_reg_dropped}/{len(pairs)} pairs", file=sys.stderr)
     else:
+        # No filter, so mark every pair as kept and pass 2 can read the same flag either way.
         for p in pairs:
             p["_reg_keep"] = True
 

@@ -54,10 +54,12 @@ def retry_fallbacks(args, src, tgt):
     from generate_semantic_chunks import ChunkGenerator
     from chunk_validate import parse_single_latency
 
+    # Step 1: reopen the chunks file written by the first pass.
     with open(args.output, encoding="utf-8") as f:
         entries = json.load(f)
 
     def count_fb():
+        """How many sentences currently fail at each latency. Run before and after to show progress."""
         c = Counter()
         for e in entries:
             for lat in LATENCY_CHUNK_WORDS:
@@ -71,6 +73,9 @@ def retry_fallbacks(args, src, tgt):
     print(f"Loading chunker model: {args.model}")
     cg = ChunkGenerator(args.model, min_similarity=args.min_reconstruction_similarity)
 
+    # Step 2: one model call for ONE latency. do_sample=True is the important part: the first pass
+    # used greedy decoding, which always returns the same answer, so simply asking again would repeat
+    # the same mistake. Sampling gives a different answer each time, which is what lets us retry.
     @torch.no_grad()
     def sample_single(source, target, method, language, latency):
         prompt = chunk_prompts.build_prompt_single(method, language, source, target, latency)
@@ -86,6 +91,8 @@ def retry_fallbacks(args, src, tgt):
 
     out_path = args.retry_output or args.output
     budget = args.max_examples  # in retry mode: cap on # of fallback ENTRIES to retry (smoke); None = all
+    # Step 3: walk the failed sentences only. Anything that already chunked cleanly is left alone,
+    # so this pass can improve the file but never make it worse.
     recovered, processed = Counter(), 0
     for e in entries:
         if not e.get("fallback"):
@@ -95,14 +102,17 @@ def retry_fallbacks(args, src, tgt):
         idx = e["idx"]
         s, t = src[idx].strip(), tgt[idx].strip()
         method, language = e["method"], e["language"]
+        # Retry each failed latency on its own; latencies that already passed keep their chunks.
         for lat in LATENCY_CHUNK_WORDS:
             if not e["fallback_by_latency"].get(lat):
                 continue
+            # Try a few samples and stop at the first one that rebuilds the sentence.
             for _ in range(args.retry_samples):
                 try:
                     aligned = parse_single_latency(
                         sample_single(s, t, method, language, lat), s, t, args.min_reconstruction_similarity)
                 except Exception:
+                    # A failed generation just counts as a bad sample, it should not kill the job.
                     aligned = None
                 if aligned is not None:
                     sc, tc = aligned
@@ -111,8 +121,10 @@ def retry_fallbacks(args, src, tgt):
                     e["fallback_reason_by_latency"][lat] = None
                     recovered[lat] += 1
                     break
+        # The sentence still counts as a fallback if any of its three latencies is still failing.
         e["fallback"] = any(e["fallback_by_latency"].values())
         processed += 1
+        # Save periodically so a job that runs out of walltime still keeps what it recovered.
         if processed % 100 == 0:
             with open(out_path, "w", encoding="utf-8") as f:
                 json.dump(entries, f, ensure_ascii=False, indent=2)
@@ -130,6 +142,10 @@ def retry_fallbacks(args, src, tgt):
 
 
 def main():
+    """Chunk one (language, method) pair and write the chunks file.
+
+    Reads the Step 1 parallel files, splits every sentence pair at 3 latencies, and saves the result
+    plus how often the model failed and we used the word-count split instead."""
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser()
     ap.add_argument("--language", required=True, choices=chunk_prompts.LANGUAGES)

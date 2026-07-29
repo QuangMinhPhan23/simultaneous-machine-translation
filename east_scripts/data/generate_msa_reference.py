@@ -43,6 +43,7 @@ def main():
         model.cuda()
     model.eval()
 
+    # NLLB picks its output language from the first decoder token, which this id pins to MSA.
     forced_bos_token_id = get_msa_forced_bos_id(tokenizer)
 
     with open(args.data_path, "r", encoding="utf-8") as f:
@@ -57,7 +58,9 @@ def main():
             output_ids = model.generate(
                 **inputs, forced_bos_token_id=forced_bos_token_id, max_new_tokens=args.max_new_tokens,
             )
+            # One sentence per call, so batch_decode returns a one-item list to unpack.
             msa_text = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
+            # idx is the position in the input file, which is the key rescoring joins on.
             results.append({"index": idx, "source": ex["source"], "msa_reference": msa_text})
 
     # Step 3: save the MSA text along with its position, so rescoring can line the two files up.

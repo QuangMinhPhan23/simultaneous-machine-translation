@@ -69,6 +69,7 @@ def main():
             parsed.append((row["latency"], pairs))
 
     print(f"Loaded {len(simt_rows)} SiMT rows; {len(parsed)} have >=2 chunks (usable for this check)")
+    # Embedding every row would be slow, so only --sample_size of them are actually checked.
     if len(parsed) > args.sample_size:
         parsed = random.sample(parsed, args.sample_size)
     print(f"Sampling {len(parsed)} examples for embedding-based alignment check\n")
@@ -87,8 +88,10 @@ def main():
         sims = util.cos_sim(src_emb, tgt_emb).numpy()  # sims[i][j] = sim(src_i, tgt_j)
 
         n = len(pairs)
+        # The diagonal is the real pairing: source chunk i against target chunk i.
         matched = [sims[i][i] for i in range(n)]
-        # Derangement: a shuffle with no chunk left in its own position.
+        # Derangement: a shuffle with no chunk left in its own position. Retry until every position
+        # moved, so the control never accidentally contains a correct pair.
         perm = list(range(n))
         while True:
             random.shuffle(perm)
@@ -96,6 +99,8 @@ def main():
                 break
         shuffled = [sims[i][perm[i]] for i in range(n)]
 
+        # One record per example: both means and the gap between them, plus the chunks themselves
+        # so the worst cases can be printed at the end.
         matched_mean = sum(matched) / n
         shuffled_mean = sum(shuffled) / n
         per_example_results.append({
@@ -111,6 +116,7 @@ def main():
     # printed at the end for manual inspection.
     per_example_results.sort(key=lambda r: r["gap"])
 
+    # Whole-sample view: the two averages, and how many examples the real pairing actually won.
     n_total = len(per_example_results)
     n_matched_wins = sum(1 for r in per_example_results if r["gap"] > 0)
     avg_matched = sum(r["matched_mean"] for r in per_example_results) / n_total
@@ -140,6 +146,8 @@ def main():
     print("=" * 70)
     print(f"WORST {args.show_worst} EXAMPLES (matched - shuffled most negative, i.e. shuffled looked MORE aligned)")
     print("=" * 70)
+    # Step 5: the list is already sorted by gap, so the front of it is the worst cases. Printing
+    # the chunks lets a human check whether the misalignment is real.
     for r in per_example_results[:args.show_worst]:
         print(f"\n[{r['latency']}] n_chunks={r['n_chunks']}  matched={r['matched_mean']:.4f}  shuffled={r['shuffled_mean']:.4f}  gap={r['gap']:+.4f}")
         for i, (sc, tc) in enumerate(r["pairs"]):

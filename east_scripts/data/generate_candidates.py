@@ -31,6 +31,7 @@ def main():
 
     # Step 1: load the tokenizer and work out which token ids should stop generation.
     tokenizer = AutoTokenizer.from_pretrained(args.model_path, use_fast=True, trust_remote_code=True)
+    # generate() needs a pad token; reuse EOS when the checkpoint does not define one.
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -73,6 +74,8 @@ def main():
                 add_generation_prompt=True,
             )
             inputs = tokenizer([prompt], add_special_tokens=False, return_tensors="pt").to(device)
+            # Beam search with sampling off, so re-running the same checkpoint gives the same
+            # candidates every time.
             output_ids = model.generate(
                 inputs.input_ids,
                 attention_mask=inputs.attention_mask,
@@ -86,6 +89,8 @@ def main():
             generated = output_ids[0][inputs.input_ids.shape[1]:]
             prediction = tokenizer.decode(generated, skip_special_tokens=True).strip()
 
+            # One row per example: the human reference and the model's own output side by side.
+            # The language tags are copied through so a later stage can filter on them.
             results.append({
                 "instruction": ex["instruction"],
                 "input": ex.get("input", ""),

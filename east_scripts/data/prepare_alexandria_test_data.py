@@ -28,16 +28,19 @@ DIALECT_NAMES = {
 
 def build_test_set(country, domain, split, direction, tgt_label=None):
     """Turns every conversation turn of the chosen slice into one source/reference test example."""
+    # Load one dialect's split, then narrow it to a single conversation domain if one is given.
     dataset = load_dataset("UBC-NLP/alexandria", name=country, split=split)
     if domain is not None:
         dataset = dataset.filter(lambda x: x["domain"] == domain)
 
+    # tgt_label lets the caller override the language name written into each example.
     tgt_dialect_name = tgt_label or DIALECT_NAMES.get(country, f"Arabic ({country})")
 
     # The two conversations are turn-aligned, so turn i of each is the same utterance.
     examples = []
     for conv in dataset:
         for eng_turn, dia_turn in zip(conv["english_conversation"], conv["dialectal_conversation"]):
+            # A turn is only usable as a test example when both sides carry text.
             eng_text = eng_turn["text"].strip()
             dia_text = dia_turn["text"].strip()
             if not eng_text or not dia_text:
@@ -51,6 +54,7 @@ def build_test_set(country, domain, split, direction, tgt_label=None):
                 source, reference = dia_text, eng_text
                 src_lang, tgt_lang = tgt_dialect_name, "English"
 
+            # conv_id and domain ride along, so results can be grouped by them afterwards.
             examples.append(
                 {
                     "source": source,

@@ -76,6 +76,10 @@ def measure(tok, texts):
 
 
 def main():
+    """Measure how many tokens each language needs, and write the comparison table.
+
+    The last table is the important one: it shows how much a token-based latency score would be
+    inflated for the languages the tokenizer splits more finely."""
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=1000)

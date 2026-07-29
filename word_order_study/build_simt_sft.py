@@ -122,6 +122,7 @@ def build(args):
 
 
 def main():
+    """Build the training file for one (language, method) pair and report what went into it."""
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser()
     ap.add_argument("--language", required=True, choices=chunk_prompts.LANGUAGES)

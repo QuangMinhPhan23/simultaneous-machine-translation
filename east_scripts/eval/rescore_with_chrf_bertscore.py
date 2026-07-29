@@ -48,16 +48,21 @@ def rescore_cell(pred_path, do_bertscore, bertscore_model, write):
 
     A "cell" is one model / variant / latency folder. With --write, the new scores are also
     stored back into that folder's prediction.json and results.json."""
+    # prediction.json holds one entry per test sentence, each with the model output and the human
+    # reference, which is everything the metrics need.
     preds = load_json(pred_path)
     hyps = [p["prediction"] for p in preds]
     refs = [p["reference"] for p in preds]
 
+    # chrF++ always runs: it is pure string matching, so it needs no model and no GPU. The
+    # per-sentence scores are attached to their prediction entry.
     chrf_corpus, chrf_sent = chrf_pp(hyps, refs)
     for p, s in zip(preds, chrf_sent):
         p["chrF++"] = s
 
     row = {"n": len(preds), "chrF++": chrf_corpus}
 
+    # BERTScore is opt-in because it downloads and runs a transformer model.
     if do_bertscore:
         bs_corpus, bs_sent = bert_score_arabic(hyps, refs, bertscore_model)
         for p, s in zip(preds, bs_sent):
@@ -70,6 +75,7 @@ def rescore_cell(pred_path, do_bertscore, bertscore_model, write):
         with open(pred_path, "w", encoding="utf-8") as f:
             json.dump(preds, f, ensure_ascii=False, indent=4)
         results_path = os.path.join(os.path.dirname(pred_path), "results.json")
+        # Start from the existing corpus scores if there are any, so BLEU / COMET / AL survive.
         try:
             results = load_json(results_path)
         except FileNotFoundError:
@@ -111,12 +117,16 @@ def main():
         print(f"No prediction.json found under {args.results_root}")
         return
 
+    # Tab-separated output, so the table can be pasted straight into a spreadsheet.
     header = ["cell", "n", "chrF++"] + (["BERTScore_F1"] if args.bertscore else [])
     print("\t".join(header))
     for pred_path in pred_paths:
+        # --all only matches files that exist, but a hand-typed --cell may not, so report it and
+        # keep going instead of crashing.
         if not os.path.exists(pred_path):
             print(f"MISSING\t{pred_path}")
             continue
+        # Name each row by its path under the results root, e.g. nilechat/chunk-llama/high.
         cell = os.path.relpath(os.path.dirname(pred_path), args.results_root)
         row = rescore_cell(pred_path, args.bertscore, args.bertscore_model, args.write)
         vals = [cell, str(row["n"]), f'{row["chrF++"]:.2f}']

@@ -47,8 +47,11 @@ def main():
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
+    # One seeded RNG shared by every shuffle, so the control pairing is reproducible.
     rng = random.Random(args.seed)
 
+    # The chunks file records, for every entry and every latency, the chunks themselves plus a flag
+    # saying whether that latency fell back to the word-count backup.
     with open(args.chunks_path, "r", encoding="utf-8") as f:
         entries = json.load(f)
 
@@ -67,8 +70,10 @@ def main():
                 continue
             source_chunks = chunk_entry["source_chunks"]
             target_chunks = chunk_entry["target_chunks"]
+            # A single chunk cannot be deranged, and unequal counts have no diagonal to read.
             if len(source_chunks) < 2 or len(source_chunks) != len(target_chunks):
                 continue
+            # The fallback flag is what decides which of the two source buckets this chunking is in.
             src = "fallback" if fallback_by_latency.get(lat) else "llm"
             groups[(src, lat)].append((source_chunks, target_chunks))
 
@@ -82,11 +87,13 @@ def main():
             if not pairs_list:
                 print(f"  {lat}: no usable (>=2 chunks) examples in this group")
                 continue
+            # Score every chunking in this bucket, then average the two columns.
             matched_scores, shuffled_scores = [], []
             for source_chunks, target_chunks in pairs_list:
                 m, s = matched_vs_shuffled(source_chunks, target_chunks, model, rng)
                 matched_scores.append(m)
                 shuffled_scores.append(s)
+            # matched-wins counts the chunkings where the real pairing beat its shuffled control.
             n_total = len(pairs_list)
             n_wins = sum(1 for m, s in zip(matched_scores, shuffled_scores) if m > s)
             avg_matched = sum(matched_scores) / n_total

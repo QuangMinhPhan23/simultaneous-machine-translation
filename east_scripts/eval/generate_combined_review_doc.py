@@ -74,9 +74,11 @@ def pick_chunk_examples(n_success, n_fallback, seed, min_words, max_words, laten
     Only turns that all three chunkers handled are usable, since the point is to compare them
     side by side. Two samples are drawn: turns where every chunker succeeded, and turns where at
     least one fell back, so a reviewer sees both."""
+    # Load the three chunkers' output for the same training file, each keyed by turn.
     llama = load_chunks("data/mt_data/train_data/chunks-llama.json")
     gemma = load_chunks("data/mt_data/train_data/chunks-gemma.json")
     nilechat = load_chunks("data/mt_data/train_data/chunks-nilechat.json")
+    # Keep only the turns that all three chunkers produced, and that all three cut at this latency.
     common_keys = set(llama) & set(gemma) & set(nilechat)
     common_keys = {
         k for k in common_keys
@@ -91,19 +93,24 @@ def pick_chunk_examples(n_success, n_fallback, seed, min_words, max_words, laten
         return min_words <= n_words <= max_words
 
     def any_fallback(key):
+        """True if at least one of the three chunkers fell back on this turn."""
         return (
             entry_fallback(llama[key], latency)
             or entry_fallback(gemma[key], latency)
             or entry_fallback(nilechat[key], latency)
         )
 
+    # Split the readable turns into two pools, so both can be sampled from separately.
     success_pool = [k for k in common_keys if not any_fallback(k) and source_len_ok(k)]
     fallback_pool = [k for k in common_keys if any_fallback(k) and source_len_ok(k)]
 
+    # Fixed seed, so re-running produces the same sheet. min() covers a pool smaller than asked for.
     rng = random.Random(seed)
     success_keys = rng.sample(success_pool, min(n_success, len(success_pool)))
     fallback_keys = rng.sample(fallback_pool, min(n_fallback, len(fallback_pool)))
 
+    # Each example carries its bucket label, the turn key, and all three chunkers' tables, which is
+    # everything render_chunk_table needs to draw one block.
     return (
         [("all chunkers succeeded", k, llama, gemma, nilechat) for k in success_keys]
         + [("contains >=1 fallback", k, llama, gemma, nilechat) for k in fallback_keys]
@@ -115,15 +122,19 @@ def render_chunk_table(examples, latency):
 
     The first row is the uncut reference sentence pair, then one row per chunker showing where it
     cut, with the chunks joined by " / ". Each chunker row carries a Y/N checklist."""
+    # Nothing survived the length and fallback filters, so say so instead of drawing an empty table.
     if not examples:
         return "<p>No examples matched the requested filters.</p>"
     rows = []
     for status, key, llama, gemma, nilechat in examples:
         conv_id, turn_idx = key
         entries = [("llama", llama[key]), ("gemma", gemma[key]), ("nilechat", nilechat[key])]
+        # All three cut the same sentence pair, so joining any one of them with spaces rebuilds the
+        # uncut reference shown at the top of the block.
         first_chunks = entry_chunks(entries[0][1], latency)
         ref_en = " ".join(first_chunks["source_chunks"])
         ref_ar = " ".join(first_chunks["target_chunks"])
+        # The turn id cell spans the reference row plus one row per chunker.
         n_rows = len(entries) + 1
         rows.append(
             f'<tr><td rowspan="{n_rows}">{esc(f"{conv_id} / {turn_idx}")}<br>'
@@ -132,6 +143,8 @@ def render_chunk_table(examples, latency):
             f'<td>{esc(ref_en)}</td><td lang="ar" dir="rtl">{esc(ref_ar)}</td>'
             f'<td></td></tr>'
         )
+        # One row per chunker. The " / " separator is what makes the cut points visible, and the
+        # name is tagged when that chunker used the word-count backup on this turn.
         for name, entry in entries:
             chunk_data = entry_chunks(entry, latency)
             fb = " (fallback)" if entry_fallback(entry, latency) else ""
@@ -148,6 +161,7 @@ def render_chunk_table(examples, latency):
                 f'<td>{esc(en)}</td><td lang="ar" dir="rtl">{esc(ar)}</td>'
                 f'<td dir="ltr">{checklist}</td></tr>'
             )
+    # Header row plus every body row, wrapped in a div that scrolls sideways on a narrow screen.
     return (
         '<div class="table-wrap"><table><thead><tr><th>Turn</th><th>Chunker</th>'
         '<th>English chunks</th><th>Egyptian Arabic chunks</th><th>Review</th></tr></thead><tbody>'
@@ -172,6 +186,8 @@ def pick_translation_examples(model_key, variant, latency, results_root,
     Sampling only the worst or only random examples would give a skewed picture, so the picks are
     the lowest and highest COMET, detected repetition loops, code-switched text, and random.
     Each index is used once: a bucket only draws from what earlier buckets did not take."""
+    # Load both systems' saved output for this cell. Either one can be missing if that system was
+    # never evaluated here, but at least one has to exist.
     east8b_preds = load_predictions_maybe(f"{results_root}/east8b/{variant}/{latency}/prediction.json")
     nilechat_preds = load_predictions_maybe(f"{results_root}/nilechat/{variant}/{latency}/prediction.json")
     if east8b_preds is None and nilechat_preds is None:
@@ -186,6 +202,8 @@ def pick_translation_examples(model_key, variant, latency, results_root,
     if primary is None:
         primary = east8b_preds if east8b_preds is not None else nilechat_preds
 
+    # Only sentences both systems translated can be shown side by side. With one system, every
+    # index it has is usable.
     if east8b_preds is not None and nilechat_preds is not None:
         common_idx = sorted(set(east8b_preds) & set(nilechat_preds))
     else:
@@ -195,9 +213,13 @@ def pick_translation_examples(model_key, variant, latency, results_root,
     scored = [i for i in common_idx if "COMET" in primary[i]]
     ranked = sorted(scored, key=lambda i: primary[i]["COMET"])
 
+    # picks is the output list of (bucket label, index); picked remembers which indices are taken
+    # already, so no sentence is shown twice.
     picked = set()
     picks = []
 
+    # Buckets 1 and 2: the two ends of the ranking. The best ones are reversed so the highest
+    # scoring sentence is listed first.
     worst = ranked[:n_bad]
     picks += [("lowest COMET", i) for i in worst]
     picked.update(worst)
@@ -211,12 +233,16 @@ def pick_translation_examples(model_key, variant, latency, results_root,
         preds = [p for p in (east8b_preds, nilechat_preds) if p is not None]
         return any(has_repetition_loop(p[i]["prediction"]) for p in preds)
 
+    # Bucket 3: sentences where a system got stuck repeating a word. The pool is sampled with a
+    # fixed seed, and the same rng then serves the two buckets below.
     repetition_pool = [i for i in scored if i not in picked and any_model_repeats(i)]
     rng = random.Random(seed)
     repetition_pick = rng.sample(repetition_pool, min(n_repetition, len(repetition_pool)))
     picks += [("repetition loop detected", i) for i in repetition_pick]
     picked.update(repetition_pick)
 
+    # Bucket 4: sentences with a run of Latin letters in the reference or in the output, i.e.
+    # English text sitting inside the Arabic.
     codeswitch_pool = [
         i for i in scored
         if i not in picked and (has_code_switch(primary[i]["reference"])
@@ -240,11 +266,14 @@ def render_translation_table(picks, east8b_preds, nilechat_preds):
 
     Each row shows the English source, the human Egyptian reference, and both systems' output
     with their scores and a Y/N checklist."""
+    # No sentence was selected at all, so there is no table to draw.
     if not picks:
         return "<p>No examples available.</p>"
 
     def score_str(p):
-        """Format whichever of BLEU / COMET / AL this prediction happens to carry."""
+        """Format whichever of BLEU / COMET / AL this prediction happens to carry.
+
+        Which metrics exist depends on how that cell was scored, so each one is checked first."""
         parts = []
         if "BLEU" in p:
             parts.append(f'BLEU {p["BLEU"]:.1f}')
@@ -254,6 +283,7 @@ def render_translation_table(picks, east8b_preds, nilechat_preds):
             parts.append(f'AL {p["AL"]:.1f}')
         return " · ".join(parts)
 
+    # The same two Y/N questions go under every system output cell, so build the block once.
     checklist = (
         '<div class="checklist" dir="ltr">'
         'Translation correct? Y / N &nbsp; Note: __________<br>'
@@ -271,8 +301,12 @@ def render_translation_table(picks, east8b_preds, nilechat_preds):
             f'<span class="score">{esc(model_label)}: {esc(score_str(p))}</span>{checklist}</td>'
         )
 
+    # The source and the human reference are the same for both systems, so read them from whichever
+    # of the two was actually evaluated.
     rows = []
     ref_source = east8b_preds if east8b_preds is not None else nilechat_preds
+    # One row per picked sentence: index and bucket label, English source, Egyptian reference, then
+    # one output cell per system.
     for label, idx in picks:
         e = ref_source[idx]
         rows.append(
@@ -283,6 +317,7 @@ def render_translation_table(picks, east8b_preds, nilechat_preds):
             + output_cell(nilechat_preds, idx, "Nile-Chat")
             + "</tr>"
         )
+    # Header row plus every body row, wrapped in a div that scrolls sideways on a narrow screen.
     return (
         '<div class="table-wrap"><table><thead><tr><th>idx / bucket</th><th>English source</th>'
         "<th>Reference (Egyptian dialect)</th><th>EAST-8B output + review</th>"
@@ -373,6 +408,8 @@ HTML_TEMPLATE = """<!doctype html>
 def main():
     """Assemble the review sheet: chunk sections first, then the translation table, then write
     the HTML file and print what went into it."""
+    # One sheet covers one --variant / --latency cell for the translation part, plus a chunk
+    # section for every latency listed in --chunk_latencies. The n_* options set bucket sizes.
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="nilechat", choices=["east8b", "nilechat"])
     parser.add_argument("--variant", default="chunk-llama")
@@ -402,6 +439,7 @@ def main():
             args.n_chunk_success, args.n_chunk_fallback, args.seed, args.min_words, args.max_words, lat,
         )
         total_chunk_examples += len(chunk_examples)
+        # Each section is a heading, a short note for the reviewer, and one table.
         chunk_sections.append(
             f'<h2>Chunk-boundary comparison ({esc(lat)} latency)</h2>\n'
             '<p class="block-note">Same turn, cut independently by each chunker (llama / gemma / nilechat). '
@@ -417,7 +455,8 @@ def main():
         args.n_translation_codeswitch, args.n_translation_random, args.seed,
     )
 
-    # Step 3: drop the rendered tables into the page template and write the file.
+    # Step 3: drop the rendered tables into the page template and write the file. Every value is
+    # escaped, and the chunk sections are separated by a horizontal rule.
     out_html = HTML_TEMPLATE.format(
         model=esc(args.model), variant=esc(args.variant), latency=esc(args.latency),
         results_root=esc(args.results_root),
