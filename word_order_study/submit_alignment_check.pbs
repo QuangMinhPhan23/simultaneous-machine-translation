@@ -1,0 +1,47 @@
+#!/bin/bash
+# Word-order study: measure whether chunk i of the English lines up with chunk i of the target.
+# Runs check_alignment.py over every chunks file and writes data/alignment_check.md.
+#
+# Small job: a MiniLM sentence encoder over a few thousand short chunks. 2h walltime is plenty, and
+# it routes to the fast queue tier. Submit from the repo root, walltime and GPU on the command line.
+#
+# Do NOT pin A100 here. Katana's submit filter turns the requested RAM into a minimum GPU memory
+# (mem=32gb becomes mem_per_gpu_gte_45), and Katana's A100 cards are 40 GB, so that combination can
+# never be scheduled. L40S is 48 GB and satisfies it.
+#
+#   qsub -l walltime=2:00:00 -l select=1:ncpus=8:mem=32gb:ngpus=1:gpu_model=L40S word_order_study/submit_alignment_check.pbs
+#PBS -l select=1:ncpus=8:mem=32gb:ngpus=1:gpu_model=L40S
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -N wo-align
+
+cd "$PBS_O_WORKDIR"
+set -e
+
+if [ ! -f east_scripts/env.sh ] && [ -f ../east_scripts/env.sh ]; then cd ..; fi
+[ -f east_scripts/env.sh ] || { echo "ERROR: submit from the EAST repo root. PWD=$(pwd)" >&2; exit 1; }
+echo "Working dir: $(pwd)"
+
+module load python/3.11.3
+python3 -m venv "$TMPDIR/east-venv"
+source "$TMPDIR/east-venv/bin/activate"
+source east_scripts/env.sh
+bash east_scripts/setup_katana_env.sh
+pip install -q sentence-transformers
+
+if [ -z "${HF_TOKEN:-}" ] && [ -f "$HOME/.hf_token" ]; then
+    HF_TOKEN=$(cat "$HOME/.hf_token"); export HF_TOKEN
+fi
+
+export EAST_CACHE="${EAST_CACHE:-$TMPDIR/east_cache}"
+mkdir -p "$EAST_CACHE/huggingface"
+export HF_HOME="$EAST_CACHE/huggingface"
+export HF_HUB_CACHE="$EAST_CACHE/huggingface/hub"
+
+echo "=== nvidia-smi ==="
+nvidia-smi || echo "WARNING: no GPU visible"
+
+echo "=== alignment check over all chunk files ==="
+time python word_order_study/check_alignment.py
+
+echo "DONE. Results in word_order_study/data/alignment_check.md"

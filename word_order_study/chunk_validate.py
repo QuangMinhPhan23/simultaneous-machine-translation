@@ -1,10 +1,8 @@
-"""Content-tolerant chunk validator for the word-order study.
+"""Chunk validator for the word-order study.
 
-Checks that an LLM's chunking rebuilds the sentence, but compares CONTENT only (NFC, then drop
-whitespace and punctuation), so a dropped comma or period does not fail an otherwise good segmentation
-while a real content change (dropped/hallucinated word) still fails. Empty chunks are dropped. If a
-latency fails, we fall back to the word-count heuristic. JSON parsing and alignment helpers are reused
-from the Arabic pipeline (generate_semantic_chunks, build_arabic_simt_sft_data)."""
+Checks that a model's chunks rebuild the sentence, comparing content characters only: after NFC
+normalization, whitespace and punctuation are dropped. So a lost comma still passes, but a lost or
+invented word fails. A latency that fails falls back to the word-count split."""
 import difflib
 import unicodedata
 
@@ -26,12 +24,9 @@ def content_only(text):
 
 
 def reconstructs(chunks, original, min_similarity):
-    """True if joining the chunks gives back the original sentence.
-
-    Only content characters are compared, so a dropped comma or space still passes, but a
-    dropped or invented word pushes the similarity below min_similarity and fails."""
+    """True if joining the chunks gives back the original sentence, content characters only."""
     orig = content_only(original)
-    # A sentence made of nothing but punctuation and spaces has no content to check.
+    # A sentence of only punctuation and spaces has no content to compare.
     if not orig:
         return True
     joined = content_only("".join(chunks))
@@ -46,8 +41,7 @@ def _strip_empty(chunks):
 def parse_chunk_response_wo(response_text, source, target, min_similarity=DEFAULT_MIN_SIMILARITY):
     """Same contract as generate_semantic_chunks.parse_chunk_response:
     returns (chunks_by_latency, fallback_by_latency, reason_by_latency)."""
-    # If no JSON object can be pulled out of the reply, nothing is usable: every latency falls
-    # back to the word-count split with the same reason.
+    # No JSON in the reply means nothing is usable, so every latency falls back.
     parsed = extract_json_object(response_text)
     if not isinstance(parsed, dict):
         return (
@@ -56,8 +50,7 @@ def parse_chunk_response_wo(response_text, source, target, min_similarity=DEFAUL
             {lat: "json_parse_failed" for lat in LATENCY_CHUNK_WORDS},
         )
 
-    # Check each latency on its own, so one bad latency does not throw away the other two. `reason`
-    # stays None while the answer is still good, and holds the first problem found otherwise.
+    # Check each latency on its own, so one bad latency does not throw away the other two.
     chunks_by_latency, fallback_by_latency, reason_by_latency = {}, {}, {}
     for latency, json_key in LATENCY_JSON_KEYS.items():
         chunk_words = LATENCY_CHUNK_WORDS[latency]
@@ -71,14 +64,13 @@ def parse_chunk_response_wo(response_text, source, target, min_similarity=DEFAUL
             if not isinstance(sc, list) or not isinstance(tc, list):
                 reason = "missing_or_wrong_type_keys"
             else:
-                sc, tc = _strip_empty(sc), _strip_empty(tc)  # tolerate empty chunks
+                sc, tc = _strip_empty(sc), _strip_empty(tc)
                 if not sc or not tc:
                     reason = "empty_chunk_list"
                 elif not reconstructs(sc, source, min_similarity) or not reconstructs(tc, target, min_similarity):
                     reason = "reconstruction_mismatch"
 
-        # Passed: keep the model's chunks, with align_chunks forcing the two sides to the same
-        # count. Failed: use the word-count split for this latency instead.
+        # Passed: keep the model's chunks, forced to the same count on both sides. Failed: split by words.
         if reason is None:
             chunks_by_latency[latency] = align_chunks(sc, tc)
         else:
@@ -90,9 +82,9 @@ def parse_chunk_response_wo(response_text, source, target, min_similarity=DEFAUL
 
 
 def parse_single_latency(response_text, source, target, min_similarity=DEFAULT_MIN_SIMILARITY):
-    """Validate a SINGLE-latency response {"source_chunks": [...], "target_chunks": [...]} produced by
-    chunk_prompts.build_prompt_single. Returns aligned (source_chunks, target_chunks) if it passes the
-    same content-tolerant checks, else None (caller should try another sample or keep the fallback)."""
+    """Validate a single-latency response and return aligned (source_chunks, target_chunks).
+
+    Same checks as above. Returns None if the answer is unusable, so the caller can try again."""
     parsed = extract_json_object(response_text)
     if not isinstance(parsed, dict):
         return None

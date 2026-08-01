@@ -1,10 +1,7 @@
 """Prompt registry for the word-order study: Method A (generic) vs Method B (language-specific).
 
-Both methods share the SAME scaffold (JSON schema, three granularities in one call, verbatim
-reconstruction rule, worked example). Method B only ADDS a per-language word-order-guidance block, so an
-A/B difference isolates the guidance, not a prompt-format change. The scaffold mirrors
-east_scripts/data/generate_semantic_chunks.py so the shared parser applies unchanged. build_prompt() is the
-main entry; build_prompt_single() is a single-latency variant used by the retry pass.
+Both methods share one prompt scaffold; Method B only adds a per-language word-order guidance block.
+build_prompt() asks for all three latencies in one answer, build_prompt_single() for one latency.
 """
 import json
 
@@ -18,7 +15,7 @@ TGT_LANG_NAME = {
     "egyptian": "Egyptian Arabic",
 }
 
-# Method B word-order guidance, condensed from the study plan to the segmentation-relevant strategy.
+# Method B word-order guidance, one block per language.
 GUIDANCE = {
     "vietnamese": (
         "WORD-ORDER GUIDANCE (Vietnamese): Vietnamese has the same Subject-Verb-Object order as "
@@ -57,7 +54,7 @@ GUIDANCE = {
     ),
 }
 
-# Shared English worked example (same across languages).
+# Shared English worked example.
 _EX_EN = {
     "low": ["Good morning,", "I need", "ten kilograms of tomatoes", "for the restaurant."],
     "medium": ["Good morning, I need", "ten kilograms of tomatoes for the restaurant."],
@@ -65,8 +62,7 @@ _EX_EN = {
 }
 _EX_EN_FULL = "Good morning, I need ten kilograms of tomatoes for the restaurant."
 
-# Per-language target worked example. Each latency list PARTITIONS the full target string, so
-# concatenating the chunks reconstructs it verbatim.
+# Per-language target worked example. Joining a latency's chunks gives back the full string.
 _EX_TGT = {
     "vietnamese": {
         "full": "Chào buổi sáng, tôi cần mười ki-lô cà chua cho nhà hàng.",
@@ -93,8 +89,7 @@ _EX_TGT = {
         "high": ["صباح الخير، عايز عشرة كيلو طماطم للمطعم."],
     },
     "korean": {
-        # Note: Korean reorders "for the restaurant" (식당에 쓸) before the object — a deliberate
-        # SOV/reordering demonstration; chunk-i alignment is approximate, format is exact.
+        # Korean moves "for the restaurant" before the object, to show SOV reordering.
         "full": "안녕하세요, 식당에 쓸 토마토 십 킬로그램이 필요해요.",
         "low": ["안녕하세요,", "식당에 쓸", "토마토 십 킬로그램이", "필요해요."],
         "medium": ["안녕하세요, 식당에 쓸", "토마토 십 킬로그램이 필요해요."],
@@ -102,19 +97,18 @@ _EX_TGT = {
     },
 }
 
-# The exact JSON shape the model is told to answer with: all three latencies in one object.
+# The JSON shape the model must answer with: all three latencies in one object.
 _SCHEMA_LINE = ('{"low_latency": {"source_chunks": ["...", "..."], "target_chunks": ["...", "..."]}, '
                 '"medium_latency": {"source_chunks": ["...", "..."], "target_chunks": ["...", "..."]}, '
                 '"high_latency": {"source_chunks": ["...", "..."], "target_chunks": ["...", "..."]}}')
 
-# Sentinels for the source/target actually being chunked — substituted last via str.replace so the JSON
-# example's real braces never collide with str.format field parsing.
+# Placeholders for the sentence pair. They are filled in with str.replace, not str.format, so the
+# braces in the JSON example are left alone.
 SRC_SENTINEL, TGT_SENTINEL = "__SOURCE__", "__TARGET__"
 
 
 def _example_json(language):
-    """Render the worked example as the JSON the model should imitate: the shared English chunks
-    paired with that language's target chunks, at all three latencies."""
+    """Render the worked example as the JSON the model should imitate, for all three latencies."""
     tgt = _EX_TGT[language]
     obj = {
         "low_latency": {"source_chunks": _EX_EN["low"], "target_chunks": tgt["low"]},
@@ -163,10 +157,8 @@ def build_prompt(method, language, source, target):
     return get_template(method, language).replace(SRC_SENTINEL, source).replace(TGT_SENTINEL, target)
 
 
-# --- Single-latency prompt (used by the --retry_fallbacks pass) --------------------------------------
-# Asking for ONE granularity per call produces a much shorter response, which (a) eliminates the
-# max_new_tokens truncation that causes json_parse_failed on long sentences, and (b) reduces the model's
-# drift/paraphrasing that causes reconstruction_mismatch. Same rules + worked example, single JSON object.
+# --- Single-latency prompt, used by the --retry_fallbacks pass ---------------------------------------
+# Same rules and worked example as above, but one latency per call, so the answer is much shorter.
 
 _LAT_DESC = {
     "low": "brief, coherent phrases that each convey one complete thought (the FINEST granularity -- the MOST chunks)",

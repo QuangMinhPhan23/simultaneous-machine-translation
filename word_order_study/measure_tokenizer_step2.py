@@ -1,12 +1,9 @@
 """Step 2: tokenizer analysis for the word-order study.
 
-Measures how efficiently the Llama-3-8B tokenizer (the EAST base's tokenizer) encodes each language's
-target side. A language that needs ~2x the tokens for the same content gets an artificially inflated
-token-based Average Lagging; this quantifies that confound. Reports chars/token, tokens/sentence, and
-tokens/word for the target (and English source as reference) over the first --n train sentences.
-
-Tokenizer: NousResearch/Meta-Llama-3-8B-Instruct, an ungated identical mirror of the official Llama-3
-(same 128k vocab); falls back to the gated official repo if an HF token is present.
+Measures how many Llama-3 tokens each language needs for the same content, over the first --n
+sentences of a split. Reports chars/token, tokens/sentence and tokens/word for the target side,
+the English side as a reference, and how much a token-based latency score is inflated per language.
+Writes data/tokenizer_fertility.md.
 
 Usage:
   python word_order_study/measure_tokenizer_step2.py [--n 1000 --split train]
@@ -35,10 +32,7 @@ TOKENIZER_CANDIDATES = [
 
 
 def load_tokenizer():
-    """Return the first candidate tokenizer that loads.
-
-    The official repo is gated, so it only works with an HF token; otherwise the identical
-    ungated mirror is used. Both have the same 128k vocabulary."""
+    """Return the first candidate tokenizer that loads."""
     last = None
     for m in TOKENIZER_CANDIDATES:
         try:
@@ -58,10 +52,7 @@ def read_lines(path, n):
 
 
 def measure(tok, texts):
-    """Tokenize a list of sentences and return the fertility numbers for them.
-
-    Totals are summed over all the sentences first, then divided, so long sentences count more
-    than short ones. Words are whitespace-split."""
+    """Tokenize the sentences and return the fertility ratios, summed first then divided."""
     chars = sum(len(t) for t in texts)
     words = sum(len(t.split()) for t in texts)
     toks = sum(len(tok.encode(t, add_special_tokens=False)) for t in texts)
@@ -76,10 +67,7 @@ def measure(tok, texts):
 
 
 def main():
-    """Measure how many tokens each language needs, and write the comparison table.
-
-    The last table is the important one: it shows how much a token-based latency score would be
-    inflated for the languages the tokenizer splits more finely."""
+    """Measure how many tokens each language needs, and write the comparison tables."""
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=1000)
@@ -89,8 +77,7 @@ def main():
     # Step 1: load the tokenizer once and reuse it for every language.
     tok = load_tokenizer()
 
-    # Step 2: measure both sides of each language's split. The English side is the same kind of
-    # text everywhere, so it acts as a reference the target numbers can be read against.
+    # Step 2: measure both sides of each language. English is the same everywhere, so it is a reference.
     tgt_rows, src_rows = [], []
     for name, ext, script in LANGS:
         tgt = read_lines(os.path.join(DATA, name, f"{args.split}.{ext}"), args.n)
@@ -117,7 +104,7 @@ def main():
                      f"{s['tokens_per_word']:.3f} |")
         return "\n".join(L)
 
-    # Step 4: AL-inflation index - tokens/sentence relative to the least-fragmented language.
+    # Step 4: AL-inflation index, each language's tokens/sentence over the lowest one.
     min_tps = min(s["tokens_per_sent"] for _, _, s in tgt_rows)
     idx = ["## Token-based AL inflation index (target tokens/sentence ÷ lowest)",
            "",
@@ -129,7 +116,7 @@ def main():
     for name, script, s in tgt_rows:
         idx.append(f"| {name} | {s['tokens_per_sent']:.1f} | {s['tokens_per_sent']/min_tps:.2f}x |")
 
-    # Step 5: print the report and save the same text as a markdown file.
+    # Step 5: print the report and save the same text as markdown.
     out = "# Step 2 - Tokenizer Fertility\n\n" + fmt_target() + "\n\n" + fmt_source() + "\n\n" + "\n".join(idx) + "\n"
     print(out)
     with open(os.path.join(DATA, "tokenizer_fertility.md"), "w", encoding="utf-8", newline="\n") as f:

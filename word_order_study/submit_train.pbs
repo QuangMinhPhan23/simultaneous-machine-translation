@@ -27,7 +27,7 @@ if [ ! -f east_scripts/env.sh ] && [ -f ../east_scripts/env.sh ]; then cd ..; fi
 echo "Working dir: $(pwd)"
 
 : "${LANGUAGE:?Set LANGUAGE=vietnamese|msa|korean|saudi|egyptian via qsub -v}"
-: "${METHOD:?Set METHOD=generic|specific via qsub -v}"
+: "${METHOD:?Set METHOD=generic|specific|aligned via qsub -v}"
 MAX_EXAMPLES=${MAX_EXAMPLES:-}
 RETRY=${RETRY:-}
 

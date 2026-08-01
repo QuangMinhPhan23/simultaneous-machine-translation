@@ -64,9 +64,14 @@ class SimulInference:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
     def load_tokenizer_and_model(self, model_path):
-        """Load the checkpoint in bfloat16, move it to the GPU if there is one, and set eval mode."""
+        """Load the checkpoint in bfloat16, move it to the GPU if there is one, and set eval mode.
+
+        With --adapter_path, model_path is the frozen base model and the LoRA adapter is loaded on
+        top of it. That is how the word-order study saves its runs: one shared base plus a small
+        adapter per language, instead of a full merged copy each time."""
+        tokenizer_source = getattr(self.args, "adapter_path", None) or model_path
         self.tokenizer = AutoTokenizer.from_pretrained(
-            model_path,
+            tokenizer_source,
             use_fast=True,
             padding_side="right",
             trust_remote_code=True,
@@ -78,6 +83,16 @@ class SimulInference:
             torch_dtype=torch.bfloat16,
             low_cpu_mem_usage=True,
         )
+        adapter_path = getattr(self.args, "adapter_path", None)
+        if adapter_path:
+            from peft import PeftModel
+            print(f"Loading LoRA adapter: {adapter_path}")
+            # The adapter was trained after the read/write tokens were added, so the base embedding
+            # table has to be grown to the adapter's tokenizer before the weights will load.
+            if len(self.tokenizer) != self.model.get_input_embeddings().weight.shape[0]:
+                self.model.resize_token_embeddings(len(self.tokenizer))
+            self.model = PeftModel.from_pretrained(self.model, adapter_path, torch_dtype=torch.bfloat16)
+            self.model = self.model.merge_and_unload()
         if torch.cuda.is_available():
             self.model.cuda()
         self.model.eval()
@@ -552,7 +567,10 @@ class SimulInference:
         # COMET is a trained neural scorer: it reads source, output and reference together and
         # predicts a human-like quality score, so it can reward a correct paraphrase that BLEU
         # would miss. Each checkpoint is freed before the next one is loaded.
-        comet_ckpts = [self.args.comet_ckpt_path] + list(self.args.extra_comet_ckpts or [])
+        # COMET is skipped when no checkpoint is given. The Alexandria authors report it is not
+        # reliable for Arabic dialects, so those runs are scored on chrF++ and spBLEU instead.
+        comet_ckpts = ([self.args.comet_ckpt_path] if self.args.comet_ckpt_path else [])
+        comet_ckpts += list(self.args.extra_comet_ckpts or [])
         for i, ckpt in enumerate(comet_ckpts):
             # Extras get their folder name appended so they do not overwrite the main COMET.
             name = "COMET" if i == 0 else f"COMET::{os.path.basename(os.path.dirname(ckpt)) or ckpt}"
@@ -661,7 +679,10 @@ def load_infer_args():
                          help="Turn-end token, e.g. <|eot_id|> for Llama-3 or <end_of_turn> for Gemma-3")
     parser.add_argument("--bleurt_ckpt_path", type=str, default=None,
                          help="Optional; omit to skip BLEURT and its TensorFlow dependency")
-    parser.add_argument("--comet_ckpt_path", type=str, required=True)
+    parser.add_argument("--comet_ckpt_path", type=str, default=None,
+                        help="COMET checkpoint. Omit to skip COMET, e.g. for Arabic dialects")
+    parser.add_argument("--adapter_path", type=str, default=None,
+                        help="LoRA adapter to load on top of --model_path (local dir or HF repo)")
     parser.add_argument("--extra_comet_ckpts", type=str, nargs="*", default=None,
                          help="Extra COMET checkpoints to score, each reported as COMET::<folder>")
     parser.add_argument("--bertscore_model", type=str, default="bert-base-multilingual-cased",

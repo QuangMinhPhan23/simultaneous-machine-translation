@@ -1,0 +1,78 @@
+#!/bin/bash
+# Word-order study, Method C: build chunks from word alignment (align_chunks.py).
+#
+# Set LANGUAGE. Optional MAX_EXAMPLES for a smoke test, which also writes to a "-smoke" file so it
+# cannot be mistaken for a full run.
+#
+# GPU note: Katana turns the requested RAM into a minimum GPU memory (mem=32gb becomes
+# mem_per_gpu_gte_45), and its A100 cards are only 40 GB, so do not pin A100 with this shape.
+# L40S is 48 GB and works.
+#
+#   Smoke (20 sentences):
+#   qsub -l walltime=2:00:00 -l select=1:ncpus=8:mem=32gb:ngpus=1:gpu_model=L40S -v LANGUAGE=korean,MAX_EXAMPLES=20 word_order_study/submit_align_chunks.pbs
+#   Full run:
+#   qsub -l walltime=2:00:00 -l select=1:ncpus=8:mem=32gb:ngpus=1:gpu_model=L40S -v LANGUAGE=korean word_order_study/submit_align_chunks.pbs
+#PBS -l select=1:ncpus=8:mem=32gb:ngpus=1:gpu_model=L40S
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -N wo-align-chunk
+
+cd "$PBS_O_WORKDIR"
+set -e
+
+if [ ! -f east_scripts/env.sh ] && [ -f ../east_scripts/env.sh ]; then cd ..; fi
+[ -f east_scripts/env.sh ] || { echo "ERROR: submit from the EAST repo root. PWD=$(pwd)" >&2; exit 1; }
+echo "Working dir: $(pwd)"
+
+module load python/3.11.3
+python3 -m venv "$TMPDIR/east-venv"
+source "$TMPDIR/east-venv/bin/activate"
+source east_scripts/env.sh
+bash east_scripts/setup_katana_env.sh
+pip install -q pyvi spacy click
+# spaCy's downloader needs click, and the model wheel must match the installed spaCy major.minor.
+# Resolve the matching wheel from spacy.about, so this does not break when spacy is upgraded.
+if [ -n "${SYNTACTIC:-}" ]; then
+    python -m spacy download en_core_web_sm 2>/dev/null || {
+        SV=$(python -c "import spacy,re;print(re.match(r'(\d+\.\d+)', spacy.__version__).group(1))")
+        for MV in 3.8.0 3.7.1; do
+            case "$MV" in "$SV"*) ;; *) continue;; esac
+            pip install -q "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-${MV}/en_core_web_sm-${MV}-py3-none-any.whl" && break
+        done
+    }
+    python -c "import spacy; spacy.load('en_core_web_sm'); print('spacy model OK')"         || { echo "ERROR: spaCy model unavailable, aborting" >&2; exit 1; }
+fi
+
+if [ -z "${HF_TOKEN:-}" ] && [ -f "$HOME/.hf_token" ]; then
+    HF_TOKEN=$(cat "$HOME/.hf_token"); export HF_TOKEN
+fi
+: "${LANGUAGE:?Set LANGUAGE=vietnamese|msa|korean|saudi|egyptian via qsub -v}"
+MAX_EXAMPLES=${MAX_EXAMPLES:-}
+SYNTACTIC=${SYNTACTIC:-}
+
+export EAST_CACHE="${EAST_CACHE:-$TMPDIR/east_cache}"
+mkdir -p "$EAST_CACHE/huggingface"
+export HF_HOME="$EAST_CACHE/huggingface"
+export HF_HUB_CACHE="$EAST_CACHE/huggingface/hub"
+
+echo "=== nvidia-smi ==="
+nvidia-smi || echo "WARNING: no GPU visible"
+
+SUFFIX=""
+MAX_ARGS=""
+if [ -n "$MAX_EXAMPLES" ]; then
+    SUFFIX="-smoke"
+    MAX_ARGS="--max_examples ${MAX_EXAMPLES}"
+fi
+SYN_ARGS=""
+NAME="aligned"
+if [ -n "$SYNTACTIC" ]; then SYN_ARGS="--syntactic"; NAME="syntactic"; fi
+OUT="word_order_study/data/${LANGUAGE}/chunks-${NAME}${SUFFIX}.json"
+
+echo "=== Method C: alignment chunking  LANGUAGE=${LANGUAGE} MAX=${MAX_EXAMPLES:-<full>} -> ${OUT} ==="
+time python word_order_study/align_chunks.py \
+    --language "${LANGUAGE}" --output "${OUT}" ${MAX_ARGS} ${SYN_ARGS}
+
+echo "DONE. ${OUT}"
+echo "NEXT: check the chunks-per-sentence numbers above. If a reordering-heavy language collapses to"
+echo "about 1 chunk per sentence, alignment alone is too strict to teach low latency there."

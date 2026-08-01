@@ -1,0 +1,828 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chunks by best method per language</title>
+<style>
+:root{--bg:#f7f8fa;--card:#fff;--ink:#16202b;--mut:#5d6b7a;--line:#e3e8ee;--acc:#2f5d9e;
+--en:#2f5d9e;--tg:#1f7a68;--band:#eef2f7}
+@media(prefers-color-scheme:dark){:root{--bg:#0e1418;--card:#151d23;--ink:#e6edf3;--mut:#94a3b1;
+--line:#232e37;--acc:#7ea9e8;--en:#7ea9e8;--tg:#48b79f;--band:#1a242c}}
+:root[data-theme=light]{--bg:#f7f8fa;--card:#fff;--ink:#16202b;--mut:#5d6b7a;--line:#e3e8ee;
+--acc:#2f5d9e;--en:#2f5d9e;--tg:#1f7a68;--band:#eef2f7}
+:root[data-theme=dark]{--bg:#0e1418;--card:#151d23;--ink:#e6edf3;--mut:#94a3b1;--line:#232e37;
+--acc:#7ea9e8;--en:#7ea9e8;--tg:#48b79f;--band:#1a242c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:1000px;margin:0 auto;padding:32px 20px 72px}
+h1{font-size:1.6rem;margin:.2em 0 .3em}h2{font-size:1.15rem;margin:0}
+.dek{color:var(--mut);max-width:76ch;margin:0 0 6px}
+.note{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--acc);
+border-radius:9px;padding:11px 15px;margin:16px 0;font-size:.87rem;max-width:82ch}
+.langhead{display:flex;align-items:baseline;gap:9px;margin:34px 0 4px;padding-top:20px;
+border-top:2px solid var(--line);flex-wrap:wrap}
+.tag{font-size:.7rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;
+color:#fff;background:var(--acc);border-radius:20px;padding:3px 10px}
+.method{font-size:.82rem;color:var(--tg);font-weight:650}
+.ex{background:var(--card);border:1px solid var(--line);border-radius:11px;
+padding:15px 18px;margin:14px 0}
+.exh{font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);
+font-weight:700;margin-bottom:9px}
+.full{margin:3px 0;font-size:.94rem}
+.full .lab{font-size:.63rem;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);
+font-weight:700;margin-right:7px}
+.full.en{color:var(--en)}.full.tg{color:var(--tg)}
+.latrow{margin-top:13px;padding-top:11px;border-top:1px dashed var(--line)}
+.latname{font-size:.7rem;letter-spacing:.07em;text-transform:uppercase;color:var(--mut);
+font-weight:700;margin-bottom:7px}
+.latname .n{color:var(--acc)}
+.steps{display:flex;flex-wrap:wrap;gap:7px}
+.step{border:1px solid var(--line);border-radius:8px;overflow:hidden;min-width:70px;
+background:var(--band)}
+.step .i{font-size:.58rem;color:var(--mut);padding:2px 9px 0;font-variant-numeric:tabular-nums}
+.step .c{padding:4px 9px;font-size:.9rem}
+.step .c.en{color:var(--en);border-bottom:1px solid var(--line)}
+.step .c.tg{color:var(--tg)}
+.rtl{direction:rtl;text-align:right}
+.foot{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);
+font-size:.8rem;color:var(--mut)}
+</style></head><body><main class="wrap">
+<h1>Read/write chunks, using each language's best chunking method</h1>
+<p class="dek">Each box is one step: the English the model reads (top) and the translation it writes (bottom). Low latency means many small steps, so the model starts writing sooner.</p>
+<div class="note"><strong>Which method won, and by how much.</strong> Degradation is (chrF_high - chrF_low) / chrF_high, lower is better, measured on the held-out test set. No single method wins everywhere: the punctuation merge suits Vietnamese, whose segmenter stranded 7.9% of steps on punctuation alone, while syntactic English boundaries suit MSA. For comparison the original prompt-based chunking scored 14.6% Vietnamese, 8.0% MSA, 23.0% Korean.</div>
+<div class="langhead"><h2>Vietnamese</h2><span class="tag">SVO</span><span class="method">Method C + punctuation merge &nbsp;&middot;&nbsp; 5.3% degradation</span></div>
+<div class="ex">
+<div class="exh">Example 1 &nbsp;&middot;&nbsp; line 10</div>
+<div class="full en"><span class="lab">EN</span>So , it &#x27;s simple . All you need are those top quartile teachers .</div>
+<div class="full tg"><span class="lab">VI</span>Vậy , thật đơn giản . Tất cả những gì chúng ta cần là các giáo viên thuộc 25 % giáo viên tốt nhất .</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">6 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">So ,</div><div class="c tg">Vậy , thật</div></div>
+<div class="step"><div class="i">2</div><div class="c en">it &#x27;s simple .</div><div class="c tg">đơn giản . Tất cả những</div></div>
+<div class="step"><div class="i">3</div><div class="c en">All you</div><div class="c tg">gì chúng ta</div></div>
+<div class="step"><div class="i">4</div><div class="c en">need are</div><div class="c tg">cần là</div></div>
+<div class="step"><div class="i">5</div><div class="c en">those top</div><div class="c tg">các</div></div>
+<div class="step"><div class="i">6</div><div class="c en">quartile teachers .</div><div class="c tg">giáo viên thuộc 25 % giáo viên tốt nhất .</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">4 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">So , it &#x27;s</div><div class="c tg">Vậy , thật</div></div>
+<div class="step"><div class="i">2</div><div class="c en">simple . All you</div><div class="c tg">đơn giản . Tất cả những gì chúng ta</div></div>
+<div class="step"><div class="i">3</div><div class="c en">need are those top</div><div class="c tg">cần là các</div></div>
+<div class="step"><div class="i">4</div><div class="c en">quartile teachers .</div><div class="c tg">giáo viên thuộc 25 % giáo viên tốt nhất .</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">2 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">So , it &#x27;s simple . All you</div><div class="c tg">Vậy , thật đơn giản . Tất cả những gì chúng ta</div></div>
+<div class="step"><div class="i">2</div><div class="c en">need are those top quartile teachers .</div><div class="c tg">cần là các giáo viên thuộc 25 % giáo viên tốt nhất .</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 2 &nbsp;&middot;&nbsp; line 319</div>
+<div class="full en"><span class="lab">EN</span>First up : crowd-sourcing my 420 sq. ft. apartment in Manhattan with partners Mutopo and Jovoto.com.</div>
+<div class="full tg"><span class="lab">VI</span>Trước hết : xử lý căn hộ rộng 150 mét vuông của tôi ở Manhattan cùng những đối tác là Mutopo và Jovoto . com .</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">6 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">First up</div><div class="c tg">Trước hết</div></div>
+<div class="step"><div class="i">2</div><div class="c en">: crowd-sourcing</div><div class="c tg">: xử lý</div></div>
+<div class="step"><div class="i">3</div><div class="c en">my 420 sq. ft. apartment in</div><div class="c tg">căn hộ rộng 150 mét vuông của tôi ở</div></div>
+<div class="step"><div class="i">4</div><div class="c en">Manhattan with</div><div class="c tg">Manhattan cùng những</div></div>
+<div class="step"><div class="i">5</div><div class="c en">partners Mutopo</div><div class="c tg">đối tác là Mutopo</div></div>
+<div class="step"><div class="i">6</div><div class="c en">and Jovoto.com.</div><div class="c tg">và Jovoto . com .</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">3 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">First up : crowd-sourcing</div><div class="c tg">Trước hết : xử lý</div></div>
+<div class="step"><div class="i">2</div><div class="c en">my 420 sq. ft. apartment in Manhattan with</div><div class="c tg">căn hộ rộng 150 mét vuông của tôi ở Manhattan cùng những</div></div>
+<div class="step"><div class="i">3</div><div class="c en">partners Mutopo and Jovoto.com.</div><div class="c tg">đối tác là Mutopo và Jovoto . com .</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">2 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">First up : crowd-sourcing my 420 sq. ft.</div><div class="c tg">Trước hết : xử lý</div></div>
+<div class="step"><div class="i">2</div><div class="c en">apartment in Manhattan with partners Mutopo and Jovoto.com.</div><div class="c tg">căn hộ rộng 150 mét vuông của tôi ở Manhattan cùng những đối tác là Mutopo và Jovoto . com .</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 3 &nbsp;&middot;&nbsp; line 888</div>
+<div class="full en"><span class="lab">EN</span>Ethel Seiderman , a feisty , beloved activist in the place where I live in California .</div>
+<div class="full tg"><span class="lab">VI</span>Ethel Seiderman , một nhà hoạt động can đảm và được yêu mến gần nơi tôi sống ở California ,</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">7 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">Ethel Seiderman</div><div class="c tg">Ethel Seiderman</div></div>
+<div class="step"><div class="i">2</div><div class="c en">, a</div><div class="c tg">, một nhà</div></div>
+<div class="step"><div class="i">3</div><div class="c en">feisty , beloved activist</div><div class="c tg">hoạt động can đảm và được yêu mến</div></div>
+<div class="step"><div class="i">4</div><div class="c en">in the</div><div class="c tg">gần</div></div>
+<div class="step"><div class="i">5</div><div class="c en">place where</div><div class="c tg">nơi</div></div>
+<div class="step"><div class="i">6</div><div class="c en">I live</div><div class="c tg">tôi sống</div></div>
+<div class="step"><div class="i">7</div><div class="c en">in California .</div><div class="c tg">ở California ,</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">4 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">Ethel Seiderman , a</div><div class="c tg">Ethel Seiderman , một nhà</div></div>
+<div class="step"><div class="i">2</div><div class="c en">feisty , beloved activist</div><div class="c tg">hoạt động can đảm và được yêu mến</div></div>
+<div class="step"><div class="i">3</div><div class="c en">in the place where</div><div class="c tg">gần nơi</div></div>
+<div class="step"><div class="i">4</div><div class="c en">I live in California .</div><div class="c tg">tôi sống ở California ,</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">2 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">Ethel Seiderman , a feisty , beloved activist</div><div class="c tg">Ethel Seiderman , một nhà hoạt động can đảm và được yêu mến</div></div>
+<div class="step"><div class="i">2</div><div class="c en">in the place where I live in California .</div><div class="c tg">gần nơi tôi sống ở California ,</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 4 &nbsp;&middot;&nbsp; line 1835</div>
+<div class="full en"><span class="lab">EN</span>It &#x27;s taking a medicine that really works and diluting it down well beyond Avogadro &#x27;s limit .</div>
+<div class="full tg"><span class="lab">VI</span>Đó là lấy một loại thuốc thực sự có tác dụng và pha loãng nó vượt quá giới hạn của Avogadro nhiều lần .</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">8 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">It &#x27;s</div><div class="c tg">Đó là</div></div>
+<div class="step"><div class="i">2</div><div class="c en">taking a</div><div class="c tg">lấy một loại</div></div>
+<div class="step"><div class="i">3</div><div class="c en">medicine that</div><div class="c tg">thuốc</div></div>
+<div class="step"><div class="i">4</div><div class="c en">really works</div><div class="c tg">thực sự có tác dụng</div></div>
+<div class="step"><div class="i">5</div><div class="c en">and diluting</div><div class="c tg">và pha loãng</div></div>
+<div class="step"><div class="i">6</div><div class="c en">it down</div><div class="c tg">nó vượt</div></div>
+<div class="step"><div class="i">7</div><div class="c en">well beyond</div><div class="c tg">quá</div></div>
+<div class="step"><div class="i">8</div><div class="c en">Avogadro &#x27;s limit .</div><div class="c tg">giới hạn của Avogadro nhiều lần .</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">5 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">It &#x27;s taking a</div><div class="c tg">Đó là lấy một loại</div></div>
+<div class="step"><div class="i">2</div><div class="c en">medicine that really works</div><div class="c tg">thuốc thực sự có tác dụng</div></div>
+<div class="step"><div class="i">3</div><div class="c en">and diluting it down</div><div class="c tg">và pha loãng nó vượt</div></div>
+<div class="step"><div class="i">4</div><div class="c en">well beyond Avogadro &#x27;s</div><div class="c tg">quá</div></div>
+<div class="step"><div class="i">5</div><div class="c en">limit .</div><div class="c tg">giới hạn của Avogadro nhiều lần .</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">3 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">It &#x27;s taking a medicine that really works</div><div class="c tg">Đó là lấy một loại thuốc thực sự có tác dụng</div></div>
+<div class="step"><div class="i">2</div><div class="c en">and diluting it down well beyond Avogadro &#x27;s</div><div class="c tg">và pha loãng nó vượt quá</div></div>
+<div class="step"><div class="i">3</div><div class="c en">limit .</div><div class="c tg">giới hạn của Avogadro nhiều lần .</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 5 &nbsp;&middot;&nbsp; line 673</div>
+<div class="full en"><span class="lab">EN</span>So , having said all that , what is the secret formula for brewing compassion in the corporate setting ?</div>
+<div class="full tg"><span class="lab">VI</span>Thế thì sau khi tất cả điều vừa nói , thì cái gì là công thức bí mật để nuôi dưỡng lòng từ bi trong môi trường doanh nghiệp ?</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">9 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">So ,</div><div class="c tg">Thế thì sau</div></div>
+<div class="step"><div class="i">2</div><div class="c en">having said</div><div class="c tg">khi</div></div>
+<div class="step"><div class="i">3</div><div class="c en">all that</div><div class="c tg">tất cả điều vừa nói</div></div>
+<div class="step"><div class="i">4</div><div class="c en">, what</div><div class="c tg">, thì cái gì</div></div>
+<div class="step"><div class="i">5</div><div class="c en">is the</div><div class="c tg">là</div></div>
+<div class="step"><div class="i">6</div><div class="c en">secret formula</div><div class="c tg">công thức bí mật</div></div>
+<div class="step"><div class="i">7</div><div class="c en">for brewing</div><div class="c tg">để nuôi dưỡng</div></div>
+<div class="step"><div class="i">8</div><div class="c en">compassion in</div><div class="c tg">lòng từ bi trong</div></div>
+<div class="step"><div class="i">9</div><div class="c en">the corporate setting ?</div><div class="c tg">môi trường doanh nghiệp ?</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">5 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">So , having said</div><div class="c tg">Thế thì sau khi</div></div>
+<div class="step"><div class="i">2</div><div class="c en">all that , what</div><div class="c tg">tất cả điều vừa nói , thì cái gì</div></div>
+<div class="step"><div class="i">3</div><div class="c en">is the secret formula</div><div class="c tg">là công thức bí mật</div></div>
+<div class="step"><div class="i">4</div><div class="c en">for brewing compassion in</div><div class="c tg">để nuôi dưỡng lòng từ bi trong</div></div>
+<div class="step"><div class="i">5</div><div class="c en">the corporate setting ?</div><div class="c tg">môi trường doanh nghiệp ?</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">3 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">So , having said all that , what</div><div class="c tg">Thế thì sau khi tất cả điều vừa nói , thì cái gì</div></div>
+<div class="step"><div class="i">2</div><div class="c en">is the secret formula for brewing compassion in</div><div class="c tg">là công thức bí mật để nuôi dưỡng lòng từ bi trong</div></div>
+<div class="step"><div class="i">3</div><div class="c en">the corporate setting ?</div><div class="c tg">môi trường doanh nghiệp ?</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 6 &nbsp;&middot;&nbsp; line 1945</div>
+<div class="full en"><span class="lab">EN</span>And they don &#x27;t mean it takes lots of experience to learn how to mop floors and empty trash cans .</div>
+<div class="full tg"><span class="lab">VI</span>Và họ không ám chỉ rằng mất nhiều kinh nghiệm để biết cách lau sàn nhà và đổ thùng rác .</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">10 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">And they</div><div class="c tg">Và họ</div></div>
+<div class="step"><div class="i">2</div><div class="c en">don &#x27;t</div><div class="c tg">không</div></div>
+<div class="step"><div class="i">3</div><div class="c en">mean it</div><div class="c tg">ám chỉ rằng</div></div>
+<div class="step"><div class="i">4</div><div class="c en">takes lots</div><div class="c tg">mất</div></div>
+<div class="step"><div class="i">5</div><div class="c en">of experience</div><div class="c tg">nhiều kinh nghiệm</div></div>
+<div class="step"><div class="i">6</div><div class="c en">to learn</div><div class="c tg">để biết</div></div>
+<div class="step"><div class="i">7</div><div class="c en">how to</div><div class="c tg">cách</div></div>
+<div class="step"><div class="i">8</div><div class="c en">mop floors</div><div class="c tg">lau sàn nhà</div></div>
+<div class="step"><div class="i">9</div><div class="c en">and empty</div><div class="c tg">và đổ</div></div>
+<div class="step"><div class="i">10</div><div class="c en">trash cans .</div><div class="c tg">thùng rác .</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">5 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">And they don &#x27;t</div><div class="c tg">Và họ không</div></div>
+<div class="step"><div class="i">2</div><div class="c en">mean it takes lots</div><div class="c tg">ám chỉ rằng mất</div></div>
+<div class="step"><div class="i">3</div><div class="c en">of experience to learn</div><div class="c tg">nhiều kinh nghiệm để biết</div></div>
+<div class="step"><div class="i">4</div><div class="c en">how to mop floors</div><div class="c tg">cách lau sàn nhà</div></div>
+<div class="step"><div class="i">5</div><div class="c en">and empty trash cans .</div><div class="c tg">và đổ thùng rác .</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">3 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">And they don &#x27;t mean it takes lots</div><div class="c tg">Và họ không ám chỉ rằng mất</div></div>
+<div class="step"><div class="i">2</div><div class="c en">of experience to learn how to mop floors</div><div class="c tg">nhiều kinh nghiệm để biết cách lau sàn nhà</div></div>
+<div class="step"><div class="i">3</div><div class="c en">and empty trash cans .</div><div class="c tg">và đổ thùng rác .</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 7 &nbsp;&middot;&nbsp; line 2141</div>
+<div class="full en"><span class="lab">EN</span>She was actually sexually assaulted in boot camp and went on to co-organize a group called the Service Women &#x27;s Action Network .</div>
+<div class="full tg"><span class="lab">VI</span>Cô đã bị tấn công tình dục trong trại và sau đó đồng thành lập nhóm Service Women &#x27; s Action Network</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">9 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">She was</div><div class="c tg">Cô đã bị</div></div>
+<div class="step"><div class="i">2</div><div class="c en">actually sexually assaulted in</div><div class="c tg">tấn công tình dục trong</div></div>
+<div class="step"><div class="i">3</div><div class="c en">boot camp</div><div class="c tg">trại</div></div>
+<div class="step"><div class="i">4</div><div class="c en">and went</div><div class="c tg">và sau đó đồng</div></div>
+<div class="step"><div class="i">5</div><div class="c en">on to co-organize a</div><div class="c tg">thành lập</div></div>
+<div class="step"><div class="i">6</div><div class="c en">group called</div><div class="c tg">nhóm</div></div>
+<div class="step"><div class="i">7</div><div class="c en">the Service</div><div class="c tg">Service</div></div>
+<div class="step"><div class="i">8</div><div class="c en">Women &#x27;s</div><div class="c tg">Women &#x27; s</div></div>
+<div class="step"><div class="i">9</div><div class="c en">Action Network .</div><div class="c tg">Action Network</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">6 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">She was actually sexually</div><div class="c tg">Cô đã bị</div></div>
+<div class="step"><div class="i">2</div><div class="c en">assaulted in boot camp</div><div class="c tg">tấn công tình dục trong trại</div></div>
+<div class="step"><div class="i">3</div><div class="c en">and went on to</div><div class="c tg">và sau đó đồng</div></div>
+<div class="step"><div class="i">4</div><div class="c en">co-organize a group called</div><div class="c tg">thành lập nhóm</div></div>
+<div class="step"><div class="i">5</div><div class="c en">the Service Women &#x27;s</div><div class="c tg">Service Women &#x27; s</div></div>
+<div class="step"><div class="i">6</div><div class="c en">Action Network .</div><div class="c tg">Action Network</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">3 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">She was actually sexually assaulted in boot camp</div><div class="c tg">Cô đã bị tấn công tình dục trong trại</div></div>
+<div class="step"><div class="i">2</div><div class="c en">and went on to co-organize a group called</div><div class="c tg">và sau đó đồng thành lập nhóm</div></div>
+<div class="step"><div class="i">3</div><div class="c en">the Service Women &#x27;s Action Network .</div><div class="c tg">Service Women &#x27; s Action Network</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 8 &nbsp;&middot;&nbsp; line 2371</div>
+<div class="full en"><span class="lab">EN</span>And it &#x27;s about our fixation with celebrity and celebrity culture , and the importance of the image : celebrity is born of photography .</div>
+<div class="full tg"><span class="lab">VI</span>Đó là ý tưởng về quan điểm cứng nhắc của chúng ta về người nổi tiếng và thế giới của họ , và sự quan trọng của hình ảnh . Sự nổi tiếng ra đời từ những bức ảnh .</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">11 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">And it</div><div class="c tg">Đó</div></div>
+<div class="step"><div class="i">2</div><div class="c en">&#x27;s about</div><div class="c tg">là ý tưởng về</div></div>
+<div class="step"><div class="i">3</div><div class="c en">our fixation</div><div class="c tg">quan điểm cứng nhắc của chúng ta</div></div>
+<div class="step"><div class="i">4</div><div class="c en">with celebrity</div><div class="c tg">về người nổi tiếng</div></div>
+<div class="step"><div class="i">5</div><div class="c en">and celebrity culture ,</div><div class="c tg">và thế giới của họ ,</div></div>
+<div class="step"><div class="i">6</div><div class="c en">and the</div><div class="c tg">và sự</div></div>
+<div class="step"><div class="i">7</div><div class="c en">importance of</div><div class="c tg">quan trọng của</div></div>
+<div class="step"><div class="i">8</div><div class="c en">the image</div><div class="c tg">hình ảnh .</div></div>
+<div class="step"><div class="i">9</div><div class="c en">: celebrity</div><div class="c tg">Sự nổi tiếng</div></div>
+<div class="step"><div class="i">10</div><div class="c en">is born</div><div class="c tg">ra đời</div></div>
+<div class="step"><div class="i">11</div><div class="c en">of photography .</div><div class="c tg">từ những bức ảnh .</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">6 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">And it &#x27;s about</div><div class="c tg">Đó là ý tưởng về</div></div>
+<div class="step"><div class="i">2</div><div class="c en">our fixation with celebrity</div><div class="c tg">quan điểm cứng nhắc của chúng ta về người nổi tiếng</div></div>
+<div class="step"><div class="i">3</div><div class="c en">and celebrity culture ,</div><div class="c tg">và thế giới của họ ,</div></div>
+<div class="step"><div class="i">4</div><div class="c en">and the importance of</div><div class="c tg">và sự quan trọng của</div></div>
+<div class="step"><div class="i">5</div><div class="c en">the image : celebrity</div><div class="c tg">hình ảnh . Sự nổi tiếng</div></div>
+<div class="step"><div class="i">6</div><div class="c en">is born of photography .</div><div class="c tg">ra đời từ những bức ảnh .</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">3 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">And it &#x27;s about our fixation with celebrity</div><div class="c tg">Đó là ý tưởng về quan điểm cứng nhắc của chúng ta về người nổi tiếng</div></div>
+<div class="step"><div class="i">2</div><div class="c en">and celebrity culture , and the importance of</div><div class="c tg">và thế giới của họ , và sự quan trọng của</div></div>
+<div class="step"><div class="i">3</div><div class="c en">the image : celebrity is born of photography .</div><div class="c tg">hình ảnh . Sự nổi tiếng ra đời từ những bức ảnh .</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 9 &nbsp;&middot;&nbsp; line 245</div>
+<div class="full en"><span class="lab">EN</span>We then realized that if technology could know something about you and use it to help you , there &#x27;s an even more valuable application than that .</div>
+<div class="full tg"><span class="lab">VI</span>Thế rồi chúng tôi nhận ra , nếu công nghệ có thể biết gì đó về bạn , và dùng chúng để giúp bạn , thì sẽ có thể có những ứng dụng giá trị hơn thế nhiều .</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">12 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">We then</div><div class="c tg">Thế rồi chúng tôi</div></div>
+<div class="step"><div class="i">2</div><div class="c en">realized that</div><div class="c tg">nhận ra ,</div></div>
+<div class="step"><div class="i">3</div><div class="c en">if technology</div><div class="c tg">nếu công nghệ</div></div>
+<div class="step"><div class="i">4</div><div class="c en">could know</div><div class="c tg">có thể biết</div></div>
+<div class="step"><div class="i">5</div><div class="c en">something about</div><div class="c tg">gì đó về</div></div>
+<div class="step"><div class="i">6</div><div class="c en">you and</div><div class="c tg">bạn , và</div></div>
+<div class="step"><div class="i">7</div><div class="c en">use it</div><div class="c tg">dùng chúng</div></div>
+<div class="step"><div class="i">8</div><div class="c en">to help</div><div class="c tg">để giúp</div></div>
+<div class="step"><div class="i">9</div><div class="c en">you ,</div><div class="c tg">bạn , thì sẽ</div></div>
+<div class="step"><div class="i">10</div><div class="c en">there &#x27;s</div><div class="c tg">có thể có</div></div>
+<div class="step"><div class="i">11</div><div class="c en">an even</div><div class="c tg">những</div></div>
+<div class="step"><div class="i">12</div><div class="c en">more valuable application than that .</div><div class="c tg">ứng dụng giá trị hơn thế nhiều .</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">7 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">We then realized that</div><div class="c tg">Thế rồi chúng tôi nhận ra ,</div></div>
+<div class="step"><div class="i">2</div><div class="c en">if technology could know</div><div class="c tg">nếu công nghệ có thể biết</div></div>
+<div class="step"><div class="i">3</div><div class="c en">something about you and</div><div class="c tg">gì đó về bạn , và</div></div>
+<div class="step"><div class="i">4</div><div class="c en">use it to help</div><div class="c tg">dùng chúng để giúp</div></div>
+<div class="step"><div class="i">5</div><div class="c en">you , there &#x27;s</div><div class="c tg">bạn , thì sẽ có thể có</div></div>
+<div class="step"><div class="i">6</div><div class="c en">an even more valuable</div><div class="c tg">những</div></div>
+<div class="step"><div class="i">7</div><div class="c en">application than that .</div><div class="c tg">ứng dụng giá trị hơn thế nhiều .</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">4 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">We then realized that if technology could know</div><div class="c tg">Thế rồi chúng tôi nhận ra , nếu công nghệ có thể biết</div></div>
+<div class="step"><div class="i">2</div><div class="c en">something about you and use it to help</div><div class="c tg">gì đó về bạn , và dùng chúng để giúp</div></div>
+<div class="step"><div class="i">3</div><div class="c en">you , there &#x27;s an even more valuable</div><div class="c tg">bạn , thì sẽ có thể có những</div></div>
+<div class="step"><div class="i">4</div><div class="c en">application than that .</div><div class="c tg">ứng dụng giá trị hơn thế nhiều .</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 10 &nbsp;&middot;&nbsp; line 2397</div>
+<div class="full en"><span class="lab">EN</span>And then I took it back to the printers and showed them what I &#x27;ve done , and they were like , &quot; Of course you can do that .</div>
+<div class="full tg"><span class="lab">VI</span>Rồi quay trở lại gặp các nhà in cho họ thấy tôi làm được gì , họ chuyển thành , &quot; Tất nhiên cô làm thế được .</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">13 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">And then</div><div class="c tg">Rồi quay</div></div>
+<div class="step"><div class="i">2</div><div class="c en">I took it back</div><div class="c tg">trở lại gặp</div></div>
+<div class="step"><div class="i">3</div><div class="c en">to the</div><div class="c tg">các</div></div>
+<div class="step"><div class="i">4</div><div class="c en">printers and</div><div class="c tg">nhà in cho</div></div>
+<div class="step"><div class="i">5</div><div class="c en">showed them</div><div class="c tg">họ thấy</div></div>
+<div class="step"><div class="i">6</div><div class="c en">what I</div><div class="c tg">tôi</div></div>
+<div class="step"><div class="i">7</div><div class="c en">&#x27;ve done , and</div><div class="c tg">làm được gì ,</div></div>
+<div class="step"><div class="i">8</div><div class="c en">they were</div><div class="c tg">họ chuyển</div></div>
+<div class="step"><div class="i">9</div><div class="c en">like ,</div><div class="c tg">thành ,</div></div>
+<div class="step"><div class="i">10</div><div class="c en">&quot; Of</div><div class="c tg">&quot; Tất nhiên</div></div>
+<div class="step"><div class="i">11</div><div class="c en">course you</div><div class="c tg">cô</div></div>
+<div class="step"><div class="i">12</div><div class="c en">can do</div><div class="c tg">làm</div></div>
+<div class="step"><div class="i">13</div><div class="c en">that .</div><div class="c tg">thế được .</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">8 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">And then I took</div><div class="c tg">Rồi quay</div></div>
+<div class="step"><div class="i">2</div><div class="c en">it back to the</div><div class="c tg">trở lại gặp các</div></div>
+<div class="step"><div class="i">3</div><div class="c en">printers and showed them</div><div class="c tg">nhà in cho họ thấy</div></div>
+<div class="step"><div class="i">4</div><div class="c en">what I &#x27;ve done</div><div class="c tg">tôi làm được gì</div></div>
+<div class="step"><div class="i">5</div><div class="c en">, and they were</div><div class="c tg">, họ chuyển</div></div>
+<div class="step"><div class="i">6</div><div class="c en">like , &quot; Of</div><div class="c tg">thành , &quot; Tất nhiên</div></div>
+<div class="step"><div class="i">7</div><div class="c en">course you can do</div><div class="c tg">cô làm</div></div>
+<div class="step"><div class="i">8</div><div class="c en">that .</div><div class="c tg">thế được .</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">4 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">And then I took it back to the</div><div class="c tg">Rồi quay trở lại gặp các</div></div>
+<div class="step"><div class="i">2</div><div class="c en">printers and showed them what I &#x27;ve done</div><div class="c tg">nhà in cho họ thấy tôi làm được gì</div></div>
+<div class="step"><div class="i">3</div><div class="c en">, and they were like , &quot; Of</div><div class="c tg">, họ chuyển thành , &quot; Tất nhiên</div></div>
+<div class="step"><div class="i">4</div><div class="c en">course you can do that .</div><div class="c tg">cô làm thế được .</div></div>
+</div></div>
+</div>
+<div class="langhead"><h2>Modern Standard Arabic</h2><span class="tag">VSO</span><span class="method">Method D (syntactic) + punctuation merge &nbsp;&middot;&nbsp; 5.3% degradation</span></div>
+<div class="ex">
+<div class="exh">Example 1 &nbsp;&middot;&nbsp; line 7</div>
+<div class="full en"><span class="lab">EN</span>And I also have a little bit of a sort of smartass subtitle to this.</div>
+<div class="full tg rtl"><span class="lab">AR</span>و عندى أيضاً الى حد ما ايضاح أفضل لهذا</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">4 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">And I</div><div class="c tg rtl">و عندى</div></div>
+<div class="step"><div class="i">2</div><div class="c en">also</div><div class="c tg rtl">أيضاً الى حد ما</div></div>
+<div class="step"><div class="i">3</div><div class="c en">have a little bit of a sort of smartass subtitle</div><div class="c tg rtl">ايضاح أفضل</div></div>
+<div class="step"><div class="i">4</div><div class="c en">to this.</div><div class="c tg rtl">لهذا</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">3 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">And I also</div><div class="c tg rtl">و عندى أيضاً الى حد ما</div></div>
+<div class="step"><div class="i">2</div><div class="c en">have a little bit of a sort of smartass subtitle to</div><div class="c tg rtl">ايضاح أفضل</div></div>
+<div class="step"><div class="i">3</div><div class="c en">this.</div><div class="c tg rtl">لهذا</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">3 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">And I also have a little bit</div><div class="c tg rtl">و عندى أيضاً الى حد ما</div></div>
+<div class="step"><div class="i">2</div><div class="c en">of a sort of smartass subtitle to</div><div class="c tg rtl">ايضاح أفضل</div></div>
+<div class="step"><div class="i">3</div><div class="c en">this.</div><div class="c tg rtl">لهذا</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 2 &nbsp;&middot;&nbsp; line 282</div>
+<div class="full en"><span class="lab">EN</span>To close this part and sum up, I&#x27;d like to talk about something a little different.</div>
+<div class="full tg rtl"><span class="lab">AR</span>لانهاء وتلخيص هذا الجزء أود التحدث عن شئ مختلف</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">5 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">To close this part</div><div class="c tg rtl">لانهاء</div></div>
+<div class="step"><div class="i">2</div><div class="c en">and sum up,</div><div class="c tg rtl">وتلخيص هذا الجزء أود</div></div>
+<div class="step"><div class="i">3</div><div class="c en">I&#x27;d like to talk</div><div class="c tg rtl">التحدث</div></div>
+<div class="step"><div class="i">4</div><div class="c en">about something</div><div class="c tg rtl">عن شئ</div></div>
+<div class="step"><div class="i">5</div><div class="c en">a little different.</div><div class="c tg rtl">مختلف</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">4 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">To close this part</div><div class="c tg rtl">لانهاء</div></div>
+<div class="step"><div class="i">2</div><div class="c en">and sum up, I&#x27;d</div><div class="c tg rtl">وتلخيص هذا الجزء أود</div></div>
+<div class="step"><div class="i">3</div><div class="c en">like to talk</div><div class="c tg rtl">التحدث</div></div>
+<div class="step"><div class="i">4</div><div class="c en">about something a little different.</div><div class="c tg rtl">عن شئ مختلف</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">3 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">To close this part and sum up,</div><div class="c tg rtl">لانهاء وتلخيص هذا الجزء أود</div></div>
+<div class="step"><div class="i">2</div><div class="c en">I&#x27;d like to talk about something</div><div class="c tg rtl">التحدث عن شئ</div></div>
+<div class="step"><div class="i">3</div><div class="c en">a little different.</div><div class="c tg rtl">مختلف</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 3 &nbsp;&middot;&nbsp; line 910</div>
+<div class="full en"><span class="lab">EN</span>Traditional file systems are complex and abstract, and they take your brain extra steps to decode them.</div>
+<div class="full tg rtl"><span class="lab">AR</span>أنظمة الملفات التقليدية معقدة و مجردة. و تتطلب من دماغكم جهدا أكبر لفك شيفرتها.</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">4 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">Traditional file systems</div><div class="c tg rtl">أنظمة الملفات التقليدية</div></div>
+<div class="step"><div class="i">2</div><div class="c en">are complex and abstract, and they</div><div class="c tg rtl">معقدة و مجردة. و تتطلب من دماغكم جهدا</div></div>
+<div class="step"><div class="i">3</div><div class="c en">take your brain extra steps</div><div class="c tg rtl">أكبر</div></div>
+<div class="step"><div class="i">4</div><div class="c en">to decode them.</div><div class="c tg rtl">لفك شيفرتها.</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">4 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">Traditional file systems</div><div class="c tg rtl">أنظمة الملفات التقليدية</div></div>
+<div class="step"><div class="i">2</div><div class="c en">are complex and abstract, and they</div><div class="c tg rtl">معقدة و مجردة. و تتطلب من دماغكم جهدا</div></div>
+<div class="step"><div class="i">3</div><div class="c en">take your brain extra steps to</div><div class="c tg rtl">أكبر</div></div>
+<div class="step"><div class="i">4</div><div class="c en">decode them.</div><div class="c tg rtl">لفك شيفرتها.</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">4 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">Traditional file systems</div><div class="c tg rtl">أنظمة الملفات التقليدية</div></div>
+<div class="step"><div class="i">2</div><div class="c en">are complex and abstract, and they</div><div class="c tg rtl">معقدة و مجردة. و تتطلب من دماغكم جهدا</div></div>
+<div class="step"><div class="i">3</div><div class="c en">take your brain extra steps to</div><div class="c tg rtl">أكبر</div></div>
+<div class="step"><div class="i">4</div><div class="c en">decode them.</div><div class="c tg rtl">لفك شيفرتها.</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 4 &nbsp;&middot;&nbsp; line 1835</div>
+<div class="full en"><span class="lab">EN</span>So let&#x27;s now look at her data in summary, going from the least powerful predictor to the strongest.</div>
+<div class="full tg rtl"><span class="lab">AR</span>لذلك دعونا الآن ننظر في ملخص بياناتها، من أقلها قوة إلى أكثرها قوة.</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">5 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">So let&#x27;s</div><div class="c tg rtl">لذلك دعونا</div></div>
+<div class="step"><div class="i">2</div><div class="c en">now look</div><div class="c tg rtl">الآن ننظر</div></div>
+<div class="step"><div class="i">3</div><div class="c en">at her data in summary,</div><div class="c tg rtl">في ملخص بياناتها،</div></div>
+<div class="step"><div class="i">4</div><div class="c en">going from the least powerful predictor</div><div class="c tg rtl">من أقلها قوة</div></div>
+<div class="step"><div class="i">5</div><div class="c en">to the strongest.</div><div class="c tg rtl">إلى أكثرها قوة.</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">4 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">So let&#x27;s now look</div><div class="c tg rtl">لذلك دعونا الآن ننظر</div></div>
+<div class="step"><div class="i">2</div><div class="c en">at her data in summary, going</div><div class="c tg rtl">في ملخص بياناتها،</div></div>
+<div class="step"><div class="i">3</div><div class="c en">from the least powerful predictor</div><div class="c tg rtl">من أقلها قوة</div></div>
+<div class="step"><div class="i">4</div><div class="c en">to the strongest.</div><div class="c tg rtl">إلى أكثرها قوة.</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">4 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">So let&#x27;s now look at her data</div><div class="c tg rtl">لذلك دعونا الآن ننظر</div></div>
+<div class="step"><div class="i">2</div><div class="c en">in summary, going</div><div class="c tg rtl">في ملخص بياناتها،</div></div>
+<div class="step"><div class="i">3</div><div class="c en">from the least powerful predictor</div><div class="c tg rtl">من أقلها قوة</div></div>
+<div class="step"><div class="i">4</div><div class="c en">to the strongest.</div><div class="c tg rtl">إلى أكثرها قوة.</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 5 &nbsp;&middot;&nbsp; line 289</div>
+<div class="full en"><span class="lab">EN</span>It is cutting through our private property, our public lands, our Native American lands, our cities, a university, our neighborhoods.</div>
+<div class="full tg rtl"><span class="lab">AR</span>يخترق ممتلكاتنا الخاصة، وأراضينا العامة، وأراضينا الأمريكية الأصلية ومدننا، وجامعتنا، والحي الذي نقطنه.</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">6 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">It is cutting</div><div class="c tg rtl">يخترق ممتلكاتنا</div></div>
+<div class="step"><div class="i">2</div><div class="c en">through our private property,</div><div class="c tg rtl">الخاصة،</div></div>
+<div class="step"><div class="i">3</div><div class="c en">our public lands, our Native American</div><div class="c tg rtl">وأراضينا العامة،</div></div>
+<div class="step"><div class="i">4</div><div class="c en">lands, our cities,</div><div class="c tg rtl">وأراضينا الأمريكية الأصلية ومدننا،</div></div>
+<div class="step"><div class="i">5</div><div class="c en">a university,</div><div class="c tg rtl">وجامعتنا، والحي الذي</div></div>
+<div class="step"><div class="i">6</div><div class="c en">our neighborhoods.</div><div class="c tg rtl">نقطنه.</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">5 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">It is cutting</div><div class="c tg rtl">يخترق ممتلكاتنا</div></div>
+<div class="step"><div class="i">2</div><div class="c en">through our private property,</div><div class="c tg rtl">الخاصة،</div></div>
+<div class="step"><div class="i">3</div><div class="c en">our public lands, our Native American</div><div class="c tg rtl">وأراضينا العامة،</div></div>
+<div class="step"><div class="i">4</div><div class="c en">lands, our cities,</div><div class="c tg rtl">وأراضينا الأمريكية الأصلية ومدننا،</div></div>
+<div class="step"><div class="i">5</div><div class="c en">a university, our neighborhoods.</div><div class="c tg rtl">وجامعتنا، والحي الذي نقطنه.</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">3 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">It is cutting through our private property,</div><div class="c tg rtl">يخترق ممتلكاتنا الخاصة،</div></div>
+<div class="step"><div class="i">2</div><div class="c en">our public lands, our Native American</div><div class="c tg rtl">وأراضينا العامة،</div></div>
+<div class="step"><div class="i">3</div><div class="c en">lands, our cities, a university, our neighborhoods.</div><div class="c tg rtl">وأراضينا الأمريكية الأصلية ومدننا، وجامعتنا، والحي الذي نقطنه.</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 6 &nbsp;&middot;&nbsp; line 1510</div>
+<div class="full en"><span class="lab">EN</span>Planes can&#x27;t land here, so we were at the most risk, technically, when we had the slimmest chance of being rescued.</div>
+<div class="full tg rtl"><span class="lab">AR</span>لا تستطيع الطائرات الهبوط هناك لذا كنا في خطر كبير، حقيقةً، كانت فرصة انقاذنا ضئيلة</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">4 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">Planes can&#x27;t</div><div class="c tg rtl">لا تستطيع الطائرات</div></div>
+<div class="step"><div class="i">2</div><div class="c en">land here, so we</div><div class="c tg rtl">الهبوط هناك لذا كنا</div></div>
+<div class="step"><div class="i">3</div><div class="c en">were at the most risk, technically,</div><div class="c tg rtl">في خطر كبير، حقيقةً، كانت</div></div>
+<div class="step"><div class="i">4</div><div class="c en">when we had the slimmest chance of being rescued.</div><div class="c tg rtl">فرصة انقاذنا ضئيلة</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">4 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">Planes can&#x27;t</div><div class="c tg rtl">لا تستطيع الطائرات</div></div>
+<div class="step"><div class="i">2</div><div class="c en">land here, so we</div><div class="c tg rtl">الهبوط هناك لذا كنا</div></div>
+<div class="step"><div class="i">3</div><div class="c en">were at the most risk, technically,</div><div class="c tg rtl">في خطر كبير، حقيقةً، كانت</div></div>
+<div class="step"><div class="i">4</div><div class="c en">when we had the slimmest chance of being rescued.</div><div class="c tg rtl">فرصة انقاذنا ضئيلة</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">3 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">Planes can&#x27;t land here, so we were</div><div class="c tg rtl">لا تستطيع الطائرات الهبوط هناك لذا كنا</div></div>
+<div class="step"><div class="i">2</div><div class="c en">at the most risk, technically, when we</div><div class="c tg rtl">في خطر كبير، حقيقةً، كانت</div></div>
+<div class="step"><div class="i">3</div><div class="c en">had the slimmest chance of being rescued.</div><div class="c tg rtl">فرصة انقاذنا ضئيلة</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 7 &nbsp;&middot;&nbsp; line 612</div>
+<div class="full en"><span class="lab">EN</span>This was the backlash in Kenya, and Ghana bypassed, but then Kenya and Ghana go down together -- still a standstill in Congo.</div>
+<div class="full tg rtl"><span class="lab">AR</span>وكينيا قامت بحركة عكسية .. فتقدمت غانا ومن ثم هبط معدل وفيات الاطفال في غانا وكينيا معاً ولكنه بقي متوقفاً في الكونغو</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">6 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">This was the backlash in Kenya,</div><div class="c tg rtl">وكينيا قامت بحركة عكسية ..</div></div>
+<div class="step"><div class="i">2</div><div class="c en">and Ghana bypassed,</div><div class="c tg rtl">فتقدمت غانا ومن</div></div>
+<div class="step"><div class="i">3</div><div class="c en">but then Kenya</div><div class="c tg rtl">ثم هبط معدل وفيات الاطفال في غانا وكينيا</div></div>
+<div class="step"><div class="i">4</div><div class="c en">and Ghana go down together --</div><div class="c tg rtl">معاً ولكنه</div></div>
+<div class="step"><div class="i">5</div><div class="c en">still a standstill</div><div class="c tg rtl">بقي متوقفاً</div></div>
+<div class="step"><div class="i">6</div><div class="c en">in Congo.</div><div class="c tg rtl">في الكونغو</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">5 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">This was the backlash in Kenya, and Ghana</div><div class="c tg rtl">وكينيا قامت بحركة عكسية ..</div></div>
+<div class="step"><div class="i">2</div><div class="c en">bypassed, but then Kenya</div><div class="c tg rtl">فتقدمت غانا ومن ثم هبط معدل وفيات الاطفال في غانا وكينيا</div></div>
+<div class="step"><div class="i">3</div><div class="c en">and Ghana go down together --</div><div class="c tg rtl">معاً ولكنه</div></div>
+<div class="step"><div class="i">4</div><div class="c en">still a standstill</div><div class="c tg rtl">بقي متوقفاً</div></div>
+<div class="step"><div class="i">5</div><div class="c en">in Congo.</div><div class="c tg rtl">في الكونغو</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">4 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">This was the backlash in Kenya,</div><div class="c tg rtl">وكينيا قامت بحركة عكسية ..</div></div>
+<div class="step"><div class="i">2</div><div class="c en">and Ghana bypassed, but then Kenya</div><div class="c tg rtl">فتقدمت غانا ومن ثم هبط معدل وفيات الاطفال في غانا وكينيا</div></div>
+<div class="step"><div class="i">3</div><div class="c en">and Ghana go down together --</div><div class="c tg rtl">معاً ولكنه</div></div>
+<div class="step"><div class="i">4</div><div class="c en">still a standstill in Congo.</div><div class="c tg rtl">بقي متوقفاً في الكونغو</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 8 &nbsp;&middot;&nbsp; line 563</div>
+<div class="full en"><span class="lab">EN</span>So the whole area&#x27;s been stuck for a while, and it got reignited in the &#x27;80s when analytical technologies and computer technologies were coming on.</div>
+<div class="full tg rtl"><span class="lab">AR</span>وظل مجال البحث بأكمله عالقا لفترة، ثم عاد للظهور بقوة فى الثمانينيات عندما بدأت تقنيات التحليل وتقنيات الحاسوب بالتقدم.</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">8 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">So the whole</div><div class="c tg rtl">وظل مجال البحث بأكمله عالقا</div></div>
+<div class="step"><div class="i">2</div><div class="c en">area&#x27;s been stuck for a while,</div><div class="c tg rtl">لفترة،</div></div>
+<div class="step"><div class="i">3</div><div class="c en">and it</div><div class="c tg rtl">ثم</div></div>
+<div class="step"><div class="i">4</div><div class="c en">got reignited</div><div class="c tg rtl">عاد للظهور بقوة</div></div>
+<div class="step"><div class="i">5</div><div class="c en">in the &#x27;80s</div><div class="c tg rtl">فى الثمانينيات</div></div>
+<div class="step"><div class="i">6</div><div class="c en">when analytical technologies</div><div class="c tg rtl">عندما</div></div>
+<div class="step"><div class="i">7</div><div class="c en">and computer technologies were</div><div class="c tg rtl">بدأت تقنيات التحليل وتقنيات الحاسوب</div></div>
+<div class="step"><div class="i">8</div><div class="c en">coming on.</div><div class="c tg rtl">بالتقدم.</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">7 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">So the whole area&#x27;s</div><div class="c tg rtl">وظل مجال البحث بأكمله عالقا</div></div>
+<div class="step"><div class="i">2</div><div class="c en">been stuck for a while,</div><div class="c tg rtl">لفترة،</div></div>
+<div class="step"><div class="i">3</div><div class="c en">and it got reignited</div><div class="c tg rtl">ثم عاد للظهور بقوة</div></div>
+<div class="step"><div class="i">4</div><div class="c en">in the &#x27;80s</div><div class="c tg rtl">فى الثمانينيات</div></div>
+<div class="step"><div class="i">5</div><div class="c en">when analytical technologies</div><div class="c tg rtl">عندما</div></div>
+<div class="step"><div class="i">6</div><div class="c en">and computer technologies were</div><div class="c tg rtl">بدأت تقنيات التحليل وتقنيات الحاسوب</div></div>
+<div class="step"><div class="i">7</div><div class="c en">coming on.</div><div class="c tg rtl">بالتقدم.</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">4 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">So the whole area&#x27;s been stuck</div><div class="c tg rtl">وظل مجال البحث بأكمله عالقا</div></div>
+<div class="step"><div class="i">2</div><div class="c en">for a while, and it got reignited</div><div class="c tg rtl">لفترة، ثم عاد للظهور بقوة</div></div>
+<div class="step"><div class="i">3</div><div class="c en">in the &#x27;80s when analytical technologies</div><div class="c tg rtl">فى الثمانينيات عندما</div></div>
+<div class="step"><div class="i">4</div><div class="c en">and computer technologies were coming on.</div><div class="c tg rtl">بدأت تقنيات التحليل وتقنيات الحاسوب بالتقدم.</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 9 &nbsp;&middot;&nbsp; line 1601</div>
+<div class="full en"><span class="lab">EN</span>The icons like Michael Pollan and Jamie Oliver in his TED Prize wish both addressed this last three-decade time period as incredibly relevant for food system change.</div>
+<div class="full tg rtl"><span class="lab">AR</span>فهناك رموز كبيرة تهتم في هذا الشأن أمثال &quot; ميشيل بولان &quot; وجيمي اوليفر .. الذي فاز بجائزة تيد وكلاهما كانا يهاجمان العقود الثلاث الماضية وهم يسعون لتغير النظام الغذائي لدينا بصورة تامة</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">5 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">The icons</div><div class="c tg rtl">فهناك رموز كبيرة تهتم</div></div>
+<div class="step"><div class="i">2</div><div class="c en">like Michael Pollan and Jamie Oliver in his TED Prize</div><div class="c tg rtl">في</div></div>
+<div class="step"><div class="i">3</div><div class="c en">wish both addressed this last three-decade time period</div><div class="c tg rtl">هذا الشأن أمثال &quot; ميشيل بولان &quot; وجيمي اوليفر .. الذي فاز بجائزة تيد وكلاهما كانا يهاجمان العقود الثلاث الماضية وهم</div></div>
+<div class="step"><div class="i">4</div><div class="c en">as incredibly relevant</div><div class="c tg rtl">يسعون</div></div>
+<div class="step"><div class="i">5</div><div class="c en">for food system change.</div><div class="c tg rtl">لتغير النظام الغذائي لدينا بصورة تامة</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">5 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">The icons like Michael Pollan</div><div class="c tg rtl">فهناك رموز كبيرة تهتم</div></div>
+<div class="step"><div class="i">2</div><div class="c en">and Jamie Oliver in his TED Prize</div><div class="c tg rtl">في</div></div>
+<div class="step"><div class="i">3</div><div class="c en">wish both addressed this last three-decade time period</div><div class="c tg rtl">هذا الشأن أمثال &quot; ميشيل بولان &quot; وجيمي اوليفر .. الذي فاز بجائزة تيد وكلاهما كانا يهاجمان العقود الثلاث الماضية وهم</div></div>
+<div class="step"><div class="i">4</div><div class="c en">as incredibly relevant</div><div class="c tg rtl">يسعون</div></div>
+<div class="step"><div class="i">5</div><div class="c en">for food system change.</div><div class="c tg rtl">لتغير النظام الغذائي لدينا بصورة تامة</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">4 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">The icons like Michael Pollan</div><div class="c tg rtl">فهناك رموز كبيرة تهتم</div></div>
+<div class="step"><div class="i">2</div><div class="c en">and Jamie Oliver in his TED Prize</div><div class="c tg rtl">في</div></div>
+<div class="step"><div class="i">3</div><div class="c en">wish both addressed this last three-decade time period</div><div class="c tg rtl">هذا الشأن أمثال &quot; ميشيل بولان &quot; وجيمي اوليفر .. الذي فاز بجائزة تيد وكلاهما كانا يهاجمان العقود الثلاث الماضية وهم</div></div>
+<div class="step"><div class="i">4</div><div class="c en">as incredibly relevant for food system change.</div><div class="c tg rtl">يسعون لتغير النظام الغذائي لدينا بصورة تامة</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 10 &nbsp;&middot;&nbsp; line 2388</div>
+<div class="full en"><span class="lab">EN</span>I happened to be there the day the training wheels were supposed to come off, and let me tell you, the four-year-old did not think this was a good idea.</div>
+<div class="full tg rtl"><span class="lab">AR</span>قد كنت هناك إحدى المرات في يوم كان من المفترض أن ينتهي استخدام عجلات التدريب ودعوني أخبركم، الطفل ذا الأربعة عشر عاماً لم يعتقد أنها كانت فكرة جيدة</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">10 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">I</div><div class="c tg rtl">قد</div></div>
+<div class="step"><div class="i">2</div><div class="c en">happened to</div><div class="c tg rtl">كنت</div></div>
+<div class="step"><div class="i">3</div><div class="c en">be there the day the training wheels</div><div class="c tg rtl">هناك إحدى المرات في يوم</div></div>
+<div class="step"><div class="i">4</div><div class="c en">were</div><div class="c tg rtl">كان من</div></div>
+<div class="step"><div class="i">5</div><div class="c en">supposed to</div><div class="c tg rtl">المفترض أن</div></div>
+<div class="step"><div class="i">6</div><div class="c en">come off, and</div><div class="c tg rtl">ينتهي استخدام عجلات التدريب ودعوني</div></div>
+<div class="step"><div class="i">7</div><div class="c en">let me tell you, the four-year-old</div><div class="c tg rtl">أخبركم، الطفل ذا الأربعة عشر عاماً</div></div>
+<div class="step"><div class="i">8</div><div class="c en">did not</div><div class="c tg rtl">لم</div></div>
+<div class="step"><div class="i">9</div><div class="c en">think this</div><div class="c tg rtl">يعتقد أنها</div></div>
+<div class="step"><div class="i">10</div><div class="c en">was a good idea.</div><div class="c tg rtl">كانت فكرة جيدة</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">7 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">I happened to</div><div class="c tg rtl">قد كنت</div></div>
+<div class="step"><div class="i">2</div><div class="c en">be there the day the training wheels</div><div class="c tg rtl">هناك إحدى المرات في يوم</div></div>
+<div class="step"><div class="i">3</div><div class="c en">were supposed to</div><div class="c tg rtl">كان من المفترض أن</div></div>
+<div class="step"><div class="i">4</div><div class="c en">come off, and</div><div class="c tg rtl">ينتهي استخدام عجلات التدريب ودعوني</div></div>
+<div class="step"><div class="i">5</div><div class="c en">let me tell you, the four-year-old</div><div class="c tg rtl">أخبركم، الطفل ذا الأربعة عشر عاماً</div></div>
+<div class="step"><div class="i">6</div><div class="c en">did not think this</div><div class="c tg rtl">لم يعتقد أنها</div></div>
+<div class="step"><div class="i">7</div><div class="c en">was a good idea.</div><div class="c tg rtl">كانت فكرة جيدة</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">6 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">I happened to</div><div class="c tg rtl">قد كنت</div></div>
+<div class="step"><div class="i">2</div><div class="c en">be there the day the training wheels</div><div class="c tg rtl">هناك إحدى المرات في يوم</div></div>
+<div class="step"><div class="i">3</div><div class="c en">were supposed to come off, and</div><div class="c tg rtl">كان من المفترض أن ينتهي استخدام عجلات التدريب ودعوني</div></div>
+<div class="step"><div class="i">4</div><div class="c en">let me tell you, the four-year-old</div><div class="c tg rtl">أخبركم، الطفل ذا الأربعة عشر عاماً</div></div>
+<div class="step"><div class="i">5</div><div class="c en">did not think this</div><div class="c tg rtl">لم يعتقد أنها</div></div>
+<div class="step"><div class="i">6</div><div class="c en">was a good idea.</div><div class="c tg rtl">كانت فكرة جيدة</div></div>
+</div></div>
+</div>
+<div class="langhead"><h2>Korean</h2><span class="tag">SOV</span><span class="method">Method C + punctuation merge &nbsp;&middot;&nbsp; 7.8% degradation</span></div>
+<div class="ex">
+<div class="exh">Example 1 &nbsp;&middot;&nbsp; line 9</div>
+<div class="full en"><span class="lab">EN</span>(Laughter) But nonetheless, not just the Dutch, but everyone has this desire for the authentic.</div>
+<div class="full tg"><span class="lab">KO</span>(웃음) 그러나 그럼에도 불구하고 그들 네덜란드인 뿐 아니라 우리 모두는 진정성에 대한 갈망이 있습니다</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">5 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">(Laughter) But</div><div class="c tg">(웃음) 그러나 그럼에도 불구하고</div></div>
+<div class="step"><div class="i">2</div><div class="c en">nonetheless, not just the</div><div class="c tg">그들</div></div>
+<div class="step"><div class="i">3</div><div class="c en">Dutch, but</div><div class="c tg">네덜란드인 뿐 아니라 우리</div></div>
+<div class="step"><div class="i">4</div><div class="c en">everyone has</div><div class="c tg">모두는</div></div>
+<div class="step"><div class="i">5</div><div class="c en">this desire for the authentic.</div><div class="c tg">진정성에 대한 갈망이 있습니다</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">4 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">(Laughter) But nonetheless, not</div><div class="c tg">(웃음) 그러나 그럼에도 불구하고</div></div>
+<div class="step"><div class="i">2</div><div class="c en">just the Dutch, but</div><div class="c tg">그들 네덜란드인 뿐 아니라 우리</div></div>
+<div class="step"><div class="i">3</div><div class="c en">everyone has this desire</div><div class="c tg">모두는</div></div>
+<div class="step"><div class="i">4</div><div class="c en">for the authentic.</div><div class="c tg">진정성에 대한 갈망이 있습니다</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">2 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">(Laughter) But nonetheless, not just the Dutch, but</div><div class="c tg">(웃음) 그러나 그럼에도 불구하고 그들 네덜란드인 뿐 아니라 우리</div></div>
+<div class="step"><div class="i">2</div><div class="c en">everyone has this desire for the authentic.</div><div class="c tg">모두는 진정성에 대한 갈망이 있습니다</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 2 &nbsp;&middot;&nbsp; line 339</div>
+<div class="full en"><span class="lab">EN</span>I don&#x27;t know if you can still see the red line here and up the arm.</div>
+<div class="full tg"><span class="lab">KO</span>제 팔에 있는 붉은 선이 보이실지 모르겠지만,</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">2 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">I don&#x27;t</div><div class="c tg">제</div></div>
+<div class="step"><div class="i">2</div><div class="c en">know if you can still see the red line here and up the arm.</div><div class="c tg">팔에 있는 붉은 선이 보이실지 모르겠지만,</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">2 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">I don&#x27;t know if</div><div class="c tg">제</div></div>
+<div class="step"><div class="i">2</div><div class="c en">you can still see the red line here and up the arm.</div><div class="c tg">팔에 있는 붉은 선이 보이실지 모르겠지만,</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">2 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">I don&#x27;t know if you can still see</div><div class="c tg">제</div></div>
+<div class="step"><div class="i">2</div><div class="c en">the red line here and up the arm.</div><div class="c tg">팔에 있는 붉은 선이 보이실지 모르겠지만,</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 3 &nbsp;&middot;&nbsp; line 757</div>
+<div class="full en"><span class="lab">EN</span>And once you say that is yours, you&#x27;ve got to take it, as and when it comes.</div>
+<div class="full tg"><span class="lab">KO</span>그리고 일단 그 위험이 본인의 몫이라 말하면, 그 위험이 자신에게 닥쳤을 때, 그 위험을 감수해야 합니다.</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">4 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">And once</div><div class="c tg">그리고 일단 그</div></div>
+<div class="step"><div class="i">2</div><div class="c en">you say that is yours, you&#x27;ve</div><div class="c tg">위험이 본인의 몫이라 말하면, 그 위험이 자신에게 닥쳤을 때, 그</div></div>
+<div class="step"><div class="i">3</div><div class="c en">got to take it,</div><div class="c tg">위험을 감수해야</div></div>
+<div class="step"><div class="i">4</div><div class="c en">as and when it comes.</div><div class="c tg">합니다.</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">4 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">And once you say</div><div class="c tg">그리고 일단 그</div></div>
+<div class="step"><div class="i">2</div><div class="c en">that is yours, you&#x27;ve</div><div class="c tg">위험이 본인의 몫이라 말하면, 그 위험이 자신에게 닥쳤을 때, 그</div></div>
+<div class="step"><div class="i">3</div><div class="c en">got to take it,</div><div class="c tg">위험을 감수해야</div></div>
+<div class="step"><div class="i">4</div><div class="c en">as and when it comes.</div><div class="c tg">합니다.</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">3 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">And once you say that is yours, you&#x27;ve</div><div class="c tg">그리고 일단 그 위험이 본인의 몫이라 말하면, 그 위험이 자신에게 닥쳤을 때, 그</div></div>
+<div class="step"><div class="i">2</div><div class="c en">got to take it, as and when it</div><div class="c tg">위험을 감수해야</div></div>
+<div class="step"><div class="i">3</div><div class="c en">comes.</div><div class="c tg">합니다.</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 4 &nbsp;&middot;&nbsp; line 1535</div>
+<div class="full en"><span class="lab">EN</span>And as Dan Buettner can tell you, having a strong social network is so crucial to our health.</div>
+<div class="full tg"><span class="lab">KO</span>그리고 Dan Buettner가 얘기하듯이, 탄탄한 사회적 연계를 가지는 것이 우리의 건강에 매우 중요합니다.</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">7 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">And as</div><div class="c tg">그리고</div></div>
+<div class="step"><div class="i">2</div><div class="c en">Dan Buettner</div><div class="c tg">Dan Buettner가</div></div>
+<div class="step"><div class="i">3</div><div class="c en">can tell you, having</div><div class="c tg">얘기하듯이,</div></div>
+<div class="step"><div class="i">4</div><div class="c en">a strong</div><div class="c tg">탄탄한</div></div>
+<div class="step"><div class="i">5</div><div class="c en">social network</div><div class="c tg">사회적 연계를 가지는</div></div>
+<div class="step"><div class="i">6</div><div class="c en">is so</div><div class="c tg">것이</div></div>
+<div class="step"><div class="i">7</div><div class="c en">crucial to our health.</div><div class="c tg">우리의 건강에 매우 중요합니다.</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">5 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">And as Dan Buettner</div><div class="c tg">그리고 Dan Buettner가</div></div>
+<div class="step"><div class="i">2</div><div class="c en">can tell you, having</div><div class="c tg">얘기하듯이,</div></div>
+<div class="step"><div class="i">3</div><div class="c en">a strong social network</div><div class="c tg">탄탄한 사회적 연계를 가지는</div></div>
+<div class="step"><div class="i">4</div><div class="c en">is so crucial to</div><div class="c tg">것이</div></div>
+<div class="step"><div class="i">5</div><div class="c en">our health.</div><div class="c tg">우리의 건강에 매우 중요합니다.</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">3 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">And as Dan Buettner can tell you, having</div><div class="c tg">그리고 Dan Buettner가 얘기하듯이,</div></div>
+<div class="step"><div class="i">2</div><div class="c en">a strong social network is so crucial to</div><div class="c tg">탄탄한 사회적 연계를 가지는 것이</div></div>
+<div class="step"><div class="i">3</div><div class="c en">our health.</div><div class="c tg">우리의 건강에 매우 중요합니다.</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 5 &nbsp;&middot;&nbsp; line 145</div>
+<div class="full en"><span class="lab">EN</span>Right? Rendering, because you have to get your consumers -- as business people -- to percieve your offerings as authentic.</div>
+<div class="full tg"><span class="lab">KO</span>맞죠? 창출입니다. 여러분들이 사업가라면 소비자에게 당신이 제공하는 게 진정하다고 보이게 만들어야 하니까요</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">4 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">Right? Rendering,</div><div class="c tg">맞죠? 창출입니다. 여러분들이</div></div>
+<div class="step"><div class="i">2</div><div class="c en">because you have to get your consumers -- as business people --</div><div class="c tg">사업가라면</div></div>
+<div class="step"><div class="i">3</div><div class="c en">to percieve your offerings</div><div class="c tg">소비자에게 당신이 제공하는 게</div></div>
+<div class="step"><div class="i">4</div><div class="c en">as authentic.</div><div class="c tg">진정하다고 보이게 만들어야 하니까요</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">3 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">Right? Rendering, because you</div><div class="c tg">맞죠? 창출입니다. 여러분들이</div></div>
+<div class="step"><div class="i">2</div><div class="c en">have to get your consumers -- as business people -- to percieve</div><div class="c tg">사업가라면</div></div>
+<div class="step"><div class="i">3</div><div class="c en">your offerings as authentic.</div><div class="c tg">소비자에게 당신이 제공하는 게 진정하다고 보이게 만들어야 하니까요</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">3 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">Right? Rendering, because you have to get your</div><div class="c tg">맞죠? 창출입니다. 여러분들이</div></div>
+<div class="step"><div class="i">2</div><div class="c en">consumers -- as business people -- to percieve</div><div class="c tg">사업가라면</div></div>
+<div class="step"><div class="i">3</div><div class="c en">your offerings as authentic.</div><div class="c tg">소비자에게 당신이 제공하는 게 진정하다고 보이게 만들어야 하니까요</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 6 &nbsp;&middot;&nbsp; line 1777</div>
+<div class="full en"><span class="lab">EN</span>She says she first got started with 10 packets of bindis, and then wondered what she could do with 10 thousand.</div>
+<div class="full tg"><span class="lab">KO</span>처음엔 빈디 10 묶음으로 시작했는데, 그러면 빈디 만 개로는 뭘 할 수 있을지 상상해 보았다고 합니다.</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">4 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">She says she first</div><div class="c tg">처음엔</div></div>
+<div class="step"><div class="i">2</div><div class="c en">got started with 10 packets of bindis, and</div><div class="c tg">빈디 10 묶음으로 시작했는데,</div></div>
+<div class="step"><div class="i">3</div><div class="c en">then wondered</div><div class="c tg">그러면 빈디 만 개로는 뭘 할 수</div></div>
+<div class="step"><div class="i">4</div><div class="c en">what she could do with 10 thousand.</div><div class="c tg">있을지 상상해 보았다고 합니다.</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">3 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">She says she first</div><div class="c tg">처음엔</div></div>
+<div class="step"><div class="i">2</div><div class="c en">got started with 10 packets of bindis, and</div><div class="c tg">빈디 10 묶음으로 시작했는데,</div></div>
+<div class="step"><div class="i">3</div><div class="c en">then wondered what she could do with 10 thousand.</div><div class="c tg">그러면 빈디 만 개로는 뭘 할 수 있을지 상상해 보았다고 합니다.</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">2 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">She says she first got started with 10</div><div class="c tg">처음엔</div></div>
+<div class="step"><div class="i">2</div><div class="c en">packets of bindis, and then wondered what she could do with 10 thousand.</div><div class="c tg">빈디 10 묶음으로 시작했는데, 그러면 빈디 만 개로는 뭘 할 수 있을지 상상해 보았다고 합니다.</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 7 &nbsp;&middot;&nbsp; line 1687</div>
+<div class="full en"><span class="lab">EN</span>It&#x27;s ubiquitous and fairly cheap, and the tools to distribute it freely under open licenses has also never been cheaper or more ubiquitous.</div>
+<div class="full tg"><span class="lab">KO</span>어디에나 있고 가격도 저렴합니다. 이 도구들은 저작권도 없이 자유롭게 쓸 수 있습니다. 이렇게 저렴하고, 접근이 쉬웠던 적이 여지껏 없었습니다.</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">5 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">It&#x27;s ubiquitous</div><div class="c tg">어디에나 있고 가격도</div></div>
+<div class="step"><div class="i">2</div><div class="c en">and fairly cheap, and</div><div class="c tg">저렴합니다.</div></div>
+<div class="step"><div class="i">3</div><div class="c en">the tools</div><div class="c tg">이 도구들은</div></div>
+<div class="step"><div class="i">4</div><div class="c en">to distribute it freely under open licenses has</div><div class="c tg">저작권도 없이 자유롭게 쓸 수 있습니다. 이렇게</div></div>
+<div class="step"><div class="i">5</div><div class="c en">also never been cheaper or more ubiquitous.</div><div class="c tg">저렴하고, 접근이 쉬웠던 적이 여지껏 없었습니다.</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">4 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">It&#x27;s ubiquitous and fairly</div><div class="c tg">어디에나 있고 가격도</div></div>
+<div class="step"><div class="i">2</div><div class="c en">cheap, and the tools</div><div class="c tg">저렴합니다. 이 도구들은</div></div>
+<div class="step"><div class="i">3</div><div class="c en">to distribute it freely under open licenses has</div><div class="c tg">저작권도 없이 자유롭게 쓸 수 있습니다. 이렇게</div></div>
+<div class="step"><div class="i">4</div><div class="c en">also never been cheaper or more ubiquitous.</div><div class="c tg">저렴하고, 접근이 쉬웠던 적이 여지껏 없었습니다.</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">3 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">It&#x27;s ubiquitous and fairly cheap, and the tools</div><div class="c tg">어디에나 있고 가격도 저렴합니다. 이 도구들은</div></div>
+<div class="step"><div class="i">2</div><div class="c en">to distribute it freely under open licenses has</div><div class="c tg">저작권도 없이 자유롭게 쓸 수 있습니다. 이렇게</div></div>
+<div class="step"><div class="i">3</div><div class="c en">also never been cheaper or more ubiquitous.</div><div class="c tg">저렴하고, 접근이 쉬웠던 적이 여지껏 없었습니다.</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 8 &nbsp;&middot;&nbsp; line 1320</div>
+<div class="full en"><span class="lab">EN</span>And I know Brian Eno says there&#x27;s not enough Africa in computers, but you know, I don&#x27;t think there&#x27;s enough African history in Brian Eno.</div>
+<div class="full tg"><span class="lab">KO</span>저는 브라이언 에노가 아프리카에 컴퓨터가 부족하다고 했다 들었는데, 브라이언 에노에게는 아프리카의 역사 공부가 모자랐던 모양입니다.</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">7 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">And I</div><div class="c tg">저는</div></div>
+<div class="step"><div class="i">2</div><div class="c en">know Brian</div><div class="c tg">브라이언</div></div>
+<div class="step"><div class="i">3</div><div class="c en">Eno says</div><div class="c tg">에노가</div></div>
+<div class="step"><div class="i">4</div><div class="c en">there&#x27;s not enough Africa</div><div class="c tg">아프리카에</div></div>
+<div class="step"><div class="i">5</div><div class="c en">in computers,</div><div class="c tg">컴퓨터가 부족하다고 했다 들었는데,</div></div>
+<div class="step"><div class="i">6</div><div class="c en">but you know, I don&#x27;t think there&#x27;s enough African history in Brian</div><div class="c tg">브라이언</div></div>
+<div class="step"><div class="i">7</div><div class="c en">Eno.</div><div class="c tg">에노에게는 아프리카의 역사 공부가 모자랐던 모양입니다.</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">5 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">And I know Brian</div><div class="c tg">저는 브라이언</div></div>
+<div class="step"><div class="i">2</div><div class="c en">Eno says there&#x27;s not</div><div class="c tg">에노가</div></div>
+<div class="step"><div class="i">3</div><div class="c en">enough Africa in computers,</div><div class="c tg">아프리카에 컴퓨터가 부족하다고 했다 들었는데,</div></div>
+<div class="step"><div class="i">4</div><div class="c en">but you know, I don&#x27;t think there&#x27;s enough African history in Brian</div><div class="c tg">브라이언</div></div>
+<div class="step"><div class="i">5</div><div class="c en">Eno.</div><div class="c tg">에노에게는 아프리카의 역사 공부가 모자랐던 모양입니다.</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">4 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">And I know Brian Eno says there&#x27;s not</div><div class="c tg">저는 브라이언 에노가</div></div>
+<div class="step"><div class="i">2</div><div class="c en">enough Africa in computers, but you know, I</div><div class="c tg">아프리카에 컴퓨터가 부족하다고 했다 들었는데,</div></div>
+<div class="step"><div class="i">3</div><div class="c en">don&#x27;t think there&#x27;s enough African history in Brian</div><div class="c tg">브라이언</div></div>
+<div class="step"><div class="i">4</div><div class="c en">Eno.</div><div class="c tg">에노에게는 아프리카의 역사 공부가 모자랐던 모양입니다.</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 9 &nbsp;&middot;&nbsp; line 531</div>
+<div class="full en"><span class="lab">EN</span>In this dramatically expanded ideal of a liberal arts education where the continuum of thought and action is its life&#x27;s blood, knowledge honed outside the academy becomes essential.</div>
+<div class="full tg"><span class="lab">KO</span>극적으로 확장된 이상적인 인문학 교육에서는 사유와 행동의 연속이 생명줄이고 교육 기관 밖에서 갈고 닦은 지식이 반드시 필요해집니다.</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">8 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">In this dramatically expanded</div><div class="c tg">극적으로 확장된</div></div>
+<div class="step"><div class="i">2</div><div class="c en">ideal of a liberal</div><div class="c tg">이상적인</div></div>
+<div class="step"><div class="i">3</div><div class="c en">arts education</div><div class="c tg">인문학 교육에서는</div></div>
+<div class="step"><div class="i">4</div><div class="c en">where the continuum of thought and</div><div class="c tg">사유와</div></div>
+<div class="step"><div class="i">5</div><div class="c en">action is</div><div class="c tg">행동의 연속이</div></div>
+<div class="step"><div class="i">6</div><div class="c en">its life&#x27;s blood, knowledge</div><div class="c tg">생명줄이고</div></div>
+<div class="step"><div class="i">7</div><div class="c en">honed outside the academy</div><div class="c tg">교육 기관 밖에서 갈고 닦은</div></div>
+<div class="step"><div class="i">8</div><div class="c en">becomes essential.</div><div class="c tg">지식이 반드시 필요해집니다.</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">7 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">In this dramatically expanded</div><div class="c tg">극적으로 확장된</div></div>
+<div class="step"><div class="i">2</div><div class="c en">ideal of a liberal</div><div class="c tg">이상적인</div></div>
+<div class="step"><div class="i">3</div><div class="c en">arts education where the</div><div class="c tg">인문학 교육에서는</div></div>
+<div class="step"><div class="i">4</div><div class="c en">continuum of thought and</div><div class="c tg">사유와</div></div>
+<div class="step"><div class="i">5</div><div class="c en">action is its life&#x27;s</div><div class="c tg">행동의 연속이</div></div>
+<div class="step"><div class="i">6</div><div class="c en">blood, knowledge honed outside</div><div class="c tg">생명줄이고</div></div>
+<div class="step"><div class="i">7</div><div class="c en">the academy becomes essential.</div><div class="c tg">교육 기관 밖에서 갈고 닦은 지식이 반드시 필요해집니다.</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">4 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">In this dramatically expanded ideal of a liberal</div><div class="c tg">극적으로 확장된 이상적인</div></div>
+<div class="step"><div class="i">2</div><div class="c en">arts education where the continuum of thought and</div><div class="c tg">인문학 교육에서는 사유와</div></div>
+<div class="step"><div class="i">3</div><div class="c en">action is its life&#x27;s blood, knowledge honed outside</div><div class="c tg">행동의 연속이 생명줄이고</div></div>
+<div class="step"><div class="i">4</div><div class="c en">the academy becomes essential.</div><div class="c tg">교육 기관 밖에서 갈고 닦은 지식이 반드시 필요해집니다.</div></div>
+</div></div>
+</div>
+<div class="ex">
+<div class="exh">Example 10 &nbsp;&middot;&nbsp; line 2357</div>
+<div class="full en"><span class="lab">EN</span>My particular group&#x27;s focus was on youth violence, and having been the victim of bullying for most of my life, this was a subject in which I felt particularly passionate.</div>
+<div class="full tg"><span class="lab">KO</span>제가 속한 그룹의 초점은 청소년 폭력에 관한 것이었는데 제 삶의 대부분을 괴롭힘을 당하며 살았기 때문에 저는 이 주제에 특히 관심이 갔습니다.</div>
+<div class="latrow"><div class="latname">Low latency <span class="n">8 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">My particular</div><div class="c tg">제가 속한</div></div>
+<div class="step"><div class="i">2</div><div class="c en">group&#x27;s focus</div><div class="c tg">그룹의 초점은</div></div>
+<div class="step"><div class="i">3</div><div class="c en">was on youth violence,</div><div class="c tg">청소년 폭력에 관한 것이었는데 제 삶의</div></div>
+<div class="step"><div class="i">4</div><div class="c en">and having been the victim of bullying for most of</div><div class="c tg">대부분을 괴롭힘을 당하며</div></div>
+<div class="step"><div class="i">5</div><div class="c en">my life,</div><div class="c tg">살았기 때문에 저는</div></div>
+<div class="step"><div class="i">6</div><div class="c en">this was</div><div class="c tg">이</div></div>
+<div class="step"><div class="i">7</div><div class="c en">a subject</div><div class="c tg">주제에</div></div>
+<div class="step"><div class="i">8</div><div class="c en">in which I felt particularly passionate.</div><div class="c tg">특히 관심이 갔습니다.</div></div>
+</div></div>
+<div class="latrow"><div class="latname">Medium latency <span class="n">5 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">My particular group&#x27;s focus</div><div class="c tg">제가 속한 그룹의 초점은</div></div>
+<div class="step"><div class="i">2</div><div class="c en">was on youth violence,</div><div class="c tg">청소년 폭력에 관한 것이었는데 제 삶의</div></div>
+<div class="step"><div class="i">3</div><div class="c en">and having been the victim of bullying for most of my life,</div><div class="c tg">대부분을 괴롭힘을 당하며 살았기 때문에 저는</div></div>
+<div class="step"><div class="i">4</div><div class="c en">this was a subject</div><div class="c tg">이 주제에</div></div>
+<div class="step"><div class="i">5</div><div class="c en">in which I felt particularly passionate.</div><div class="c tg">특히 관심이 갔습니다.</div></div>
+</div></div>
+<div class="latrow"><div class="latname">High latency <span class="n">3 steps</span></div><div class="steps">
+<div class="step"><div class="i">1</div><div class="c en">My particular group&#x27;s focus was on youth violence,</div><div class="c tg">제가 속한 그룹의 초점은 청소년 폭력에 관한 것이었는데 제 삶의</div></div>
+<div class="step"><div class="i">2</div><div class="c en">and having been the victim of bullying for most of my life, this was a subject</div><div class="c tg">대부분을 괴롭힘을 당하며 살았기 때문에 저는 이 주제에</div></div>
+<div class="step"><div class="i">3</div><div class="c en">in which I felt particularly passionate.</div><div class="c tg">특히 관심이 갔습니다.</div></div>
+</div></div>
+</div>
+<div class="foot">Chunks shown exactly as the winning system was trained on, including the punctuation merge. Step counts fall from low to high latency, which is what teaches the model how long to wait before writing.</div>
+<script>try{var t=localStorage.getItem("theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</main></body></html>
