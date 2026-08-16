@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ITST Across Five Word Orders</title>
+<style>
+  :root {
+    --ground:#FFFFFF; --surface:#FAFAFA; --sunk:#F3F3F3;
+    --ink:#1A1A1A; --ink-2:#555555; --muted:#999999;
+    --rule:#E0E0E0; --rule-2:#EEEEEE;
+    --accent:#1A1A1A; --accent-w:#1A1A1A0A;
+    --signal:#1A1A1A; --signal-w:#1A1A1A0A;
+    --shadow:0 1px 3px rgba(0,0,0,.06);
+    --f-display:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --f-body:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --f-data:ui-monospace,"SF Mono","Cascadia Mono","Roboto Mono",Menlo,Consolas,monospace;
+    --pad:clamp(1.1rem,4vw,2.5rem);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:#111111; --surface:#181818; --sunk:#141414;
+      --ink:#E5E5E5; --ink-2:#AAAAAA; --muted:#666666;
+      --rule:#2A2A2A; --rule-2:#222222;
+      --accent:#E5E5E5; --accent-w:#E5E5E50A;
+      --signal:#E5E5E5; --signal-w:#E5E5E50A;
+      --shadow:0 1px 3px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#111111; --surface:#181818; --sunk:#141414;
+    --ink:#E5E5E5; --ink-2:#AAAAAA; --muted:#666666;
+    --rule:#2A2A2A; --rule-2:#222222;
+    --accent:#E5E5E5; --accent-w:#E5E5E50A;
+    --signal:#E5E5E5; --signal-w:#E5E5E50A;
+    --shadow:0 1px 3px rgba(0,0,0,.3);
+  }
+
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body {
+    background:var(--ground); color:var(--ink);
+    font-family:var(--f-body); font-size:17px; line-height:1.6;
+    -webkit-text-size-adjust:100%; padding:0 var(--pad) 4rem;
+    overflow-x:hidden;
+  }
+  .wrap { max-width:44rem; margin:0 auto; }
+
+  header.top { display:flex; flex-direction:column; gap:.7rem; padding:clamp(2rem,7vw,3.4rem) 0 1.2rem; }
+  .eyebrow { font-family:var(--f-data); font-size:.7rem; letter-spacing:.13em; text-transform:uppercase; color:var(--muted); }
+  h1 { font-family:var(--f-display); font-weight:600; font-size:clamp(1.95rem,8vw,2.9rem);
+       line-height:1.07; letter-spacing:-.015em; text-wrap:balance; margin:0; }
+  .standfirst { font-family:var(--f-display); font-size:clamp(1rem,3.5vw,1.15rem);
+       line-height:1.45; color:var(--ink-2); max-width:32rem; margin:0; }
+
+  .rail { height:1px; background:var(--rule); margin:2.6rem 0 0; }
+
+  section { padding-top:1.6rem; }
+  h2 { font-family:var(--f-display); font-size:clamp(1.3rem,5vw,1.65rem); line-height:1.15;
+       letter-spacing:-.01em; font-weight:600; text-wrap:balance; margin:0 0 .2rem;
+       display:flex; gap:.65rem; align-items:baseline; }
+  h2 .num { font-family:var(--f-data); font-size:.78rem; font-weight:400; color:var(--accent);
+       letter-spacing:.08em; flex:none; transform:translateY(-.15em); }
+  p { max-width:64ch; margin:.85rem 0; }
+  .tight p { margin:.45rem 0; }
+  strong { font-weight:650; color:var(--ink); }
+  code, .mono { font-family:var(--f-data); font-size:.86em; }
+  code { background:var(--sunk); border:1px solid var(--rule-2); padding:.08em .34em;
+         border-radius:2px; word-break:break-word; }
+  a { color:var(--accent); text-underline-offset:3px; }
+  a:focus-visible, summary:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+
+  .tiles { display:grid; gap:.7rem; margin:1.4rem 0 0; }
+  @media (min-width:40rem) { .tiles { grid-template-columns:repeat(3,1fr); } }
+  .tile { background:var(--surface); border:1px solid var(--rule); border-radius:3px;
+          padding:.9rem 1rem 1rem; display:flex; flex-direction:column; gap:.4rem; box-shadow:var(--shadow); }
+  .tile .label { font-family:var(--f-data); font-size:.67rem; letter-spacing:.1em;
+          text-transform:uppercase; color:var(--muted); }
+  .tile .big { font-family:var(--f-display); font-size:1.95rem; line-height:1;
+          font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
+  .tile .big .unit { font-size:.9rem; color:var(--muted); letter-spacing:0; }
+  .tile .note { font-size:.83rem; color:var(--ink-2); line-height:1.4; }
+
+  .meters { display:flex; flex-direction:column; gap:.85rem; margin:1.2rem 0 .3rem; max-width:32rem; }
+  .meter-row { display:grid; grid-template-columns:1fr auto; gap:.25rem .8rem; align-items:baseline; }
+  .meter-name { font-size:.92rem; color:var(--ink-2); }
+  .meter-name b { font-weight:650; color:var(--ink); }
+  .meter-val { font-family:var(--f-data); font-size:.95rem; font-variant-numeric:tabular-nums; }
+  .track { grid-column:1/-1; height:9px; background:var(--sunk); border-radius:1px; overflow:hidden; }
+  .fill { height:100%; background:var(--ink); opacity:.7; }
+  .fill.alt { background:var(--ink); opacity:.35; }
+
+  .scroll { overflow-x:auto; margin:1rem 0 0; border:1px solid var(--rule); border-radius:3px;
+            background:var(--surface); -webkit-overflow-scrolling:touch; }
+  table { border-collapse:collapse; width:100%; font-size:.87rem; }
+  caption { caption-side:top; text-align:left; font-family:var(--f-data); font-size:.69rem;
+            letter-spacing:.09em; text-transform:uppercase; color:var(--muted); padding:.65rem .85rem .05rem; }
+  th, td { padding:.44rem .85rem; text-align:right; white-space:nowrap; }
+  th:first-child, td:first-child { text-align:left; }
+  thead th { font-family:var(--f-data); font-size:.68rem; font-weight:500; letter-spacing:.07em;
+             text-transform:uppercase; color:var(--muted); border-bottom:1px solid var(--rule); }
+  tbody td { font-variant-numeric:tabular-nums; border-bottom:1px solid var(--rule-2); }
+  tbody tr:last-child td { border-bottom:0; }
+  tbody td:first-child { font-family:var(--f-data); color:var(--ink-2); }
+  td.key, th.key { font-weight:600; }
+
+  .callout { border-left:2px solid var(--rule); background:var(--surface);
+             padding:.85rem 1rem; margin:1.2rem 0; border-radius:0 3px 3px 0; }
+  .callout p { margin:0; }
+  .callout p + p { margin-top:.6rem; }
+
+  details { margin:1.2rem 0 0; border-top:1px solid var(--rule); padding-top:.8rem; }
+  summary { cursor:pointer; font-family:var(--f-data); font-size:.72rem; letter-spacing:.09em;
+            text-transform:uppercase; color:var(--accent); }
+  details[open] summary { margin-bottom:.4rem; }
+
+  footer { margin-top:2.8rem; padding-top:1.2rem; border-top:1px solid var(--rule);
+           font-size:.85rem; color:var(--muted); }
+  footer p { margin:.5rem 0; max-width:64ch; }
+  @media (prefers-reduced-motion: reduce) { * { animation:none !important; transition:none !important; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+<header class="top">
+  <div class="eyebrow">Simultaneous translation</div>
+  <h1>ITST Across Five Word Orders</h1>
+  <p class="standfirst">Does target word order drive quality loss at low latency?</p>
+</header>
+
+<div class="tiles">
+  <div class="tile">
+    <div class="label">Paper gap</div>
+    <div class="big">0.04 <span class="unit">BLEU</span></div>
+    <div class="note">After fixing 1-GPU 8k → 4-GPU 32k batch.</div>
+  </div>
+  <div class="tile">
+    <div class="label">Cross-language</div>
+    <div class="big">SOV worst</div>
+    <div class="note">Korean 4.4% > Vietnamese 2.8% > MSA 2.2%</div>
+  </div>
+  <div class="tile">
+    <div class="label">Within Arabic</div>
+    <div class="big">4.5<span class="unit">%</span> / 1.2<span class="unit">%</span></div>
+    <div class="note">VSO loses 4x more than SVO. Cleanest test.</div>
+  </div>
+</div>
+
+<div class="rail"></div>
+
+<section class="tight">
+  <h2><span class="num">01</span> Reproduction</h2>
+  <p>Paper uses 4 GPUs, effective batch 32k tokens. We have 1 GPU, so 8k batch. Setting UPDATE_FREQ=4 matches it.</p>
+  <p>1-GPU 8k batch: 0.30–0.50 BLEU below paper.<br>1-GPU 32k batch (UPDATE_FREQ=4): 0.04 BLEU. Gap was entirely the batch size.</p>
+
+  <div class="scroll">
+    <table>
+      <caption>BLEU at matched latency (AL)</caption>
+      <thead><tr><th>AL</th><th>Paper (4-GPU 32k)</th><th>1-GPU 8k</th><th>1-GPU 32k</th><th class="key">Diff</th></tr></thead>
+      <tbody>
+        <tr><td>3.95</td><td>28.56</td><td>28.10</td><td>28.52</td><td class="key">-0.04</td></tr>
+        <tr><td>4.55</td><td>28.68</td><td>28.18</td><td>28.81</td><td class="key">+0.13</td></tr>
+        <tr><td>6.10</td><td>28.81</td><td>28.44</td><td>28.70</td><td class="key">-0.11</td></tr>
+        <tr><td>8.31</td><td>28.82</td><td>28.43</td><td>28.81</td><td class="key">-0.01</td></tr>
+        <tr><td>10.75</td><td>28.89</td><td>28.59</td><td>28.89</td><td class="key">+0.00</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="rail"></div>
+
+<section class="tight">
+  <h2><span class="num">02</span> Degradation by word order</h2>
+  <p>All three on 130k pairs, 32k effective batch. chrF++ drop from peak to lowest latency.</p>
+
+  <div class="scroll">
+    <table>
+      <caption>32k batch — endpoint degradation</caption>
+      <thead><tr><th>Language</th><th>Order</th><th>Low (AL)</th><th>Peak (AL)</th><th>Drop</th><th class="key">Loss</th></tr></thead>
+      <tbody>
+        <tr><td>Korean</td><td>SOV</td><td>19.93 (5.94)</td><td>20.84 (21.20)</td><td>0.91</td><td class="key">4.4%</td></tr>
+        <tr><td>Vietnamese</td><td>SVO</td><td>48.19 (3.29)</td><td>49.57 (13.49)</td><td>1.38</td><td class="key">2.8%</td></tr>
+        <tr><td>MSA</td><td>VSO</td><td>38.30 (3.78)</td><td>39.18 (12.44)</td><td>0.88</td><td class="key">2.2%</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Same ranking with 8k batch (9.0%, 4.8%, 2.9%) — just flatter curves at 32k.</p>
+  <p>Predicted order: SOV > VSO > SVO. Actual: SOV > SVO > VSO. Korean worst, as expected. But Vietnamese (SVO, same as English) loses more than MSA (VSO). Word order alone does not explain it.</p>
+
+  <div class="callout">
+    <p>Absolute scores differ 2.5x across languages (Korean 20, MSA 39, Vietnamese 49). In raw points Vietnamese drops most (1.38), not Korean (0.91). Percentage vs points give opposite rankings.</p>
+  </div>
+</section>
+
+<div class="rail"></div>
+
+<section class="tight">
+  <h2><span class="num">03</span> Within Arabic</h2>
+  <p>Same script, same family, same data size (4,323 pairs), same MSA checkpoint, same updates. Only word order differs. 1-GPU 8k batch (the 32k dialect models underfit on this small data).</p>
+
+  <div class="meters">
+    <div class="meter-row">
+      <span class="meter-name"><b>Saudi</b>, VSO-leaning</span>
+      <span class="meter-val">4.5%</span>
+      <span class="track"><span class="fill" style="width:100%"></span></span>
+    </div>
+    <div class="meter-row">
+      <span class="meter-name"><b>Egyptian</b>, SVO</span>
+      <span class="meter-val">1.2%</span>
+      <span class="track"><span class="fill alt" style="width:27%"></span></span>
+    </div>
+  </div>
+
+  <div class="scroll">
+    <table>
+      <caption>chrF++ at AL 4 vs AL 8</caption>
+      <thead><tr><th>Dialect</th><th>Order</th><th>AL 8</th><th>AL 4</th><th>Drop</th><th class="key">Loss</th></tr></thead>
+      <tbody>
+        <tr><td>Saudi</td><td>VSO-leaning</td><td>35.46</td><td>33.86</td><td>1.60</td><td class="key">4.5%</td></tr>
+        <tr><td>Egyptian</td><td>SVO</td><td>32.51</td><td>32.11</td><td>0.40</td><td class="key">1.2%</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>VSO loses 4x more than SVO at low latency. Everything else is controlled. This is the cleanest evidence word order matters.</p>
+</section>
+
+<details>
+  <summary>Full sweeps — 32k batch</summary>
+  <div class="scroll">
+    <table>
+      <caption>Vietnamese, SVO, 130k pairs, 32k batch</caption>
+      <thead><tr><th>delta</th><th>AL</th><th>BLEU</th><th class="key">chrF++</th></tr></thead>
+      <tbody>
+        <tr><td>0.20</td><td>3.29</td><td>27.51</td><td class="key">48.19</td></tr>
+        <tr><td>0.30</td><td>4.97</td><td>28.58</td><td class="key">48.92</td></tr>
+        <tr><td>0.40</td><td>6.33</td><td>29.12</td><td class="key">49.27</td></tr>
+        <tr><td>0.50</td><td>8.41</td><td>29.38</td><td class="key">48.98</td></tr>
+        <tr><td>0.60</td><td>10.60</td><td>29.57</td><td class="key">49.20</td></tr>
+        <tr><td>0.70</td><td>13.49</td><td>29.79</td><td class="key">49.57</td></tr>
+        <tr><td>0.80</td><td>17.31</td><td>29.67</td><td class="key">49.48</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="scroll">
+    <table>
+      <caption>MSA, VSO, 130k pairs, 32k batch</caption>
+      <thead><tr><th>delta</th><th>AL</th><th>BLEU</th><th class="key">chrF++</th></tr></thead>
+      <tbody>
+        <tr><td>0.20</td><td>3.78</td><td>10.50</td><td class="key">38.30</td></tr>
+        <tr><td>0.30</td><td>5.61</td><td>11.13</td><td class="key">38.78</td></tr>
+        <tr><td>0.40</td><td>7.53</td><td>11.70</td><td class="key">39.04</td></tr>
+        <tr><td>0.50</td><td>9.97</td><td>11.76</td><td class="key">38.96</td></tr>
+        <tr><td>0.60</td><td>12.44</td><td>11.98</td><td class="key">39.18</td></tr>
+        <tr><td>0.70</td><td>15.74</td><td>11.74</td><td class="key">39.03</td></tr>
+        <tr><td>0.80</td><td>19.26</td><td>11.69</td><td class="key">39.05</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="scroll">
+    <table>
+      <caption>Korean, SOV, 130k pairs, 32k batch</caption>
+      <thead><tr><th>delta</th><th>AL</th><th>BLEU</th><th class="key">chrF++</th></tr></thead>
+      <tbody>
+        <tr><td>0.20</td><td>5.94</td><td>4.09</td><td class="key">19.93</td></tr>
+        <tr><td>0.30</td><td>8.47</td><td>4.21</td><td class="key">20.08</td></tr>
+        <tr><td>0.40</td><td>10.72</td><td>4.19</td><td class="key">20.09</td></tr>
+        <tr><td>0.50</td><td>12.67</td><td>4.51</td><td class="key">20.33</td></tr>
+        <tr><td>0.60</td><td>14.59</td><td>5.03</td><td class="key">20.62</td></tr>
+        <tr><td>0.70</td><td>17.77</td><td>5.16</td><td class="key">20.80</td></tr>
+        <tr><td>0.80</td><td>21.20</td><td>5.05</td><td class="key">20.84</td></tr>
+      </tbody>
+    </table>
+  </div>
+</details>
+
+<details>
+  <summary>Full sweeps — 8k batch</summary>
+  <div class="scroll">
+    <table>
+      <caption>Vietnamese, SVO, 130k pairs, 8k batch</caption>
+      <thead><tr><th>delta</th><th>AL</th><th>BLEU</th><th class="key">chrF++</th></tr></thead>
+      <tbody>
+        <tr><td>0.20</td><td>2.86</td><td>29.01</td><td class="key">49.08</td></tr>
+        <tr><td>0.28</td><td>3.97</td><td>30.90</td><td class="key">49.75</td></tr>
+        <tr><td>0.30</td><td>4.22</td><td>31.46</td><td class="key">50.09</td></tr>
+        <tr><td>0.40</td><td>5.84</td><td>32.51</td><td class="key">50.91</td></tr>
+        <tr><td>0.50</td><td>7.75</td><td>33.04</td><td class="key">51.45</td></tr>
+        <tr><td>0.51</td><td>8.02</td><td>33.25</td><td class="key">51.55</td></tr>
+        <tr><td>0.60</td><td>9.80</td><td>33.26</td><td class="key">51.53</td></tr>
+        <tr><td>0.70</td><td>12.40</td><td>33.17</td><td class="key">51.55</td></tr>
+        <tr><td>0.80</td><td>15.72</td><td>33.20</td><td class="key">51.55</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="scroll">
+    <table>
+      <caption>MSA, VSO, 130k pairs, 8k batch</caption>
+      <thead><tr><th>delta</th><th>AL</th><th>BLEU</th><th class="key">chrF++</th></tr></thead>
+      <tbody>
+        <tr><td>0.20</td><td>3.50</td><td>11.03</td><td class="key">37.93</td></tr>
+        <tr><td>0.22</td><td>3.82</td><td>11.22</td><td class="key">38.16</td></tr>
+        <tr><td>0.30</td><td>5.58</td><td>11.60</td><td class="key">38.79</td></tr>
+        <tr><td>0.40</td><td>7.41</td><td>11.50</td><td class="key">38.95</td></tr>
+        <tr><td>0.43</td><td>7.90</td><td>11.50</td><td class="key">39.03</td></tr>
+        <tr><td>0.50</td><td>9.29</td><td>11.73</td><td class="key">38.98</td></tr>
+        <tr><td>0.60</td><td>12.46</td><td>11.87</td><td class="key">39.04</td></tr>
+        <tr><td>0.70</td><td>15.02</td><td>11.69</td><td class="key">39.00</td></tr>
+        <tr><td>0.80</td><td>18.56</td><td>11.76</td><td class="key">39.08</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="scroll">
+    <table>
+      <caption>Korean, SOV, 130k pairs, 8k batch</caption>
+      <thead><tr><th>delta</th><th>AL</th><th>BLEU</th><th class="key">chrF++</th></tr></thead>
+      <tbody>
+        <tr><td>0.20</td><td>3.90</td><td>2.98</td><td class="key">18.69</td></tr>
+        <tr><td>0.30</td><td>6.41</td><td>3.84</td><td class="key">19.66</td></tr>
+        <tr><td>0.37</td><td>8.06</td><td>4.18</td><td class="key">19.74</td></tr>
+        <tr><td>0.40</td><td>8.85</td><td>4.79</td><td class="key">20.51</td></tr>
+        <tr><td>0.50</td><td>11.10</td><td>4.39</td><td class="key">19.93</td></tr>
+        <tr><td>0.60</td><td>12.99</td><td>4.78</td><td class="key">20.00</td></tr>
+        <tr><td>0.70</td><td>15.10</td><td>4.73</td><td class="key">20.39</td></tr>
+        <tr><td>0.80</td><td>18.10</td><td>4.62</td><td class="key">20.54</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="scroll">
+    <table>
+      <caption>Saudi, VSO-leaning, 4,323 pairs, 8k batch</caption>
+      <thead><tr><th>delta</th><th>AL</th><th class="key">chrF++</th></tr></thead>
+      <tbody>
+        <tr><td>0.2</td><td>1.80</td><td class="key">30.58</td></tr>
+        <tr><td>0.3</td><td>4.04</td><td class="key">33.92</td></tr>
+        <tr><td>0.4</td><td>7.57</td><td class="key">35.47</td></tr>
+        <tr><td>0.5</td><td>11.72</td><td class="key">35.34</td></tr>
+        <tr><td>0.6</td><td>16.02</td><td class="key">35.34</td></tr>
+        <tr><td>0.7</td><td>21.16</td><td class="key">35.53</td></tr>
+        <tr><td>0.8</td><td>25.65</td><td class="key">35.39</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="scroll">
+    <table>
+      <caption>Egyptian, SVO, 4,323 pairs, 8k batch</caption>
+      <thead><tr><th>delta</th><th>AL</th><th class="key">chrF++</th></tr></thead>
+      <tbody>
+        <tr><td>0.20</td><td>1.54</td><td class="key">29.26</td></tr>
+        <tr><td>0.30</td><td>3.66</td><td class="key">32.12</td></tr>
+        <tr><td>0.31</td><td>3.91</td><td class="key">32.10</td></tr>
+        <tr><td>0.40</td><td>7.02</td><td class="key">32.49</td></tr>
+        <tr><td>0.42</td><td>7.60</td><td class="key">32.47</td></tr>
+        <tr><td>0.50</td><td>11.31</td><td class="key">32.81</td></tr>
+        <tr><td>0.60</td><td>16.11</td><td class="key">32.80</td></tr>
+        <tr><td>0.70</td><td>21.09</td><td class="key">32.74</td></tr>
+        <tr><td>0.80</td><td>26.08</td><td class="key">32.68</td></tr>
+      </tbody>
+    </table>
+  </div>
+</details>
+
+<footer>
+  <p>AL = Average Lagging (tokens read before writing). chrF++ = sacrebleu word_order=2. ITST = Zhang and Feng, EMNLP 2022.</p>
+  <p>Numbers from <code>itst_study/RESULTS.md</code>. Scripts in <code>itst_study/README.md</code>.</p>
+</footer>
+
+</div>
+
+</body>
+</html>
