@@ -1,0 +1,43 @@
+#!/bin/bash
+#PBS -N itst-eval
+#PBS -l select=1:ncpus=8:mem=48gb:ngpus=1
+#PBS -j oe
+#PBS -o /home/z5531827/ondemand/EAST/
+#
+# Decode one trained ITST model at several read/write thresholds.
+#
+#   qsub -l walltime=2:00:00 -l select=1:ncpus=4:mem=24gb:ngpus=1 \
+#        -v DATASET=paper-envi,METRIC=multibleu,THRESHOLDS=0.1:0.2:0.3:0.4:0.5 \
+#        itst_study/submit_itst_eval.pbs
+#
+# THRESHOLDS is colon-separated (qsub -v splits on commas).
+#   qsub -l walltime=2:00:00 -l select=1:ncpus=8:mem=48gb:ngpus=1 \
+#        -v DATASET=korean itst_study/submit_itst_eval.pbs
+#   qsub -l walltime=2:00:00 -l select=1:ncpus=8:mem=48gb:ngpus=1 \
+#        -v DATASET=saudi,SPM_FROM=msa itst_study/submit_itst_eval.pbs
+#
+# Batch-size 1, beam 1 (simultaneous policy runs one token at a time).
+set -euo pipefail
+cd "$HOME/ondemand/EAST"
+source itst_study/env.sh
+
+DATASET=${DATASET:?set DATASET}
+METRIC=${METRIC:-chrf}
+THRESHOLDS=${THRESHOLDS:-"0.2:0.3:0.4:0.5:0.6:0.7:0.8"}
+THRESHOLDS=${THRESHOLDS//:/ }
+
+EXTRA=""
+if [ -n "${SPM_FROM:-}" ]; then EXTRA="--spm_from $SPM_FROM"; fi
+if [ -n "${DATA_FROM:-}" ]; then EXTRA="$EXTRA --data_from $DATA_FROM"; fi
+
+echo "dataset=$DATASET metric=$METRIC thresholds=$THRESHOLDS"
+nvidia-smi --query-gpu=name --format=csv,noheader
+
+# Decode in fairseq env, score in the sacrebleu-2.x env (see setup_itst.sh step 8).
+python itst_study/eval_itst.py --dataset "$DATASET" --thresholds $THRESHOLDS $EXTRA
+
+ITST_REPO="$ITST_REPO" "$HOME/venvs/itst-score/bin/python" itst_study/score_itst.py \
+  --dataset "$DATASET" --metric "$METRIC"
+
+echo "EVAL DONE $DATASET"
+cat "itst_study/results/$DATASET/results.json"

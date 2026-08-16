@@ -1,0 +1,84 @@
+#!/bin/bash
+#PBS -N itst-train
+#PBS -l select=1:ncpus=8:mem=48gb:ngpus=1
+#PBS -j oe
+#PBS -o /home/z5531827/ondemand/EAST/
+#
+# Train one ITST model.
+#
+#   qsub -l walltime=12:00:00 -l select=1:ncpus=8:mem=48gb:ngpus=1 \
+#        -v DATASET=paper-envi,ARCH=small itst_study/submit_itst_train.pbs
+#   qsub -l walltime=12:00:00 -l select=1:ncpus=8:mem=48gb:ngpus=1 \
+#        -v DATASET=korean itst_study/submit_itst_train.pbs
+#   qsub -l walltime=4:00:00 -l select=1:ncpus=8:mem=48gb:ngpus=1 \
+#        -v DATASET=saudi,INIT_FROM=msa itst_study/submit_itst_train.pbs
+#
+# DATASET   name under itst_study/data-bin/
+# ARCH      small (paper's En-Vi) or base. Default small.
+# INIT_FROM another DATASET whose checkpoint starts this run, for the dialects.
+# MAX_UPDATE / SMOKE_TEST=1 for a short run that only checks the thing trains.
+set -euo pipefail
+cd "$HOME/ondemand/EAST"
+source itst_study/env.sh
+
+DATASET=${DATASET:?set DATASET}
+ARCH=${ARCH:-small}
+# Paper uses 4 GPUs x 8192 = 32k effective batch. UPDATE_FREQ=4 on 1 GPU matches that.
+UPDATE_FREQ=${UPDATE_FREQ:-1}
+DATA_BIN="itst_study/data-bin/$DATASET"
+# SAVE_AS keeps a variant run from overwriting the checkpoints an existing result was decoded from.
+SAVE="$ITST_CKPT/${SAVE_AS:-$DATASET}"
+
+# A smoke run stops after a few hundred updates and writes somewhere else.
+if [ "${SMOKE_TEST:-0}" = "1" ]; then
+  MAX_UPDATE=${MAX_UPDATE:-300}
+  SAVE="$ITST_CKPT/smoke-$DATASET"
+fi
+MAX_UPDATE=${MAX_UPDATE:-50000}
+
+mkdir -p "$SAVE"
+echo "dataset=$DATASET arch=$ARCH max_update=$MAX_UPDATE update_freq=$UPDATE_FREQ save=$SAVE"
+echo "token budget: $((MAX_UPDATE * UPDATE_FREQ)) x 8192 tokens"
+nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+
+# Transformer-Small for En-Vi is what the paper used; base for the larger corpora.
+if [ "$ARCH" = "small" ]; then
+  ARCH_ARGS="--arch transformer_itst --encoder-attention-heads 4 --decoder-attention-heads 4 \
+             --encoder-embed-dim 512 --decoder-embed-dim 512 \
+             --encoder-ffn-embed-dim 1024 --decoder-ffn-embed-dim 1024 \
+             --encoder-layers 6 --decoder-layers 6"
+else
+  ARCH_ARGS="--arch transformer_itst --encoder-attention-heads 8 --decoder-attention-heads 8"
+fi
+
+# Study languages use a joined dictionary, so they can share embeddings. Paper-envi cannot.
+SHARE=""
+if [ "$DATASET" != "paper-envi" ]; then SHARE="--share-all-embeddings"; fi
+
+# Dialect starts from the MSA checkpoint (same dictionary, so weight shapes match).
+RESTORE=""
+if [ -n "${INIT_FROM:-}" ]; then
+  SRC="$ITST_CKPT/$INIT_FROM/checkpoint_best.pt"
+  [ -f "$SRC" ] || { echo "missing $SRC"; exit 1; }
+  cp "$SRC" "$SAVE/checkpoint_last.pt"
+  RESTORE="--reset-optimizer --reset-lr-scheduler --reset-dataloader --reset-meters"
+  echo "initialised from $SRC"
+fi
+
+# --uni-encoder makes the encoder causal, which simultaneous decoding needs.
+python "$ITST_REPO/train.py" --ddp-backend=no_c10d "$DATA_BIN" \
+  $ARCH_ARGS $SHARE $RESTORE \
+  --optimizer adam --adam-betas '(0.9, 0.98)' --clip-norm 0.0 \
+  --lr 5e-4 --lr-scheduler inverse_sqrt --warmup-init-lr 1e-07 --warmup-updates 4000 \
+  --dropout 0.3 \
+  --criterion label_smoothed_cross_entropy_with_itst_t2t --label-smoothing 0.1 \
+  --left-pad-source --uni-encoder True --fp16 \
+  --save-dir "$SAVE" \
+  --max-tokens 8192 --update-freq "$UPDATE_FREQ" \
+  --max-update "$MAX_UPDATE" \
+  --save-interval-updates 1000 --keep-interval-updates 10 --keep-last-epochs 1 \
+  --best-checkpoint-metric loss \
+  --log-interval 100
+
+echo "TRAIN DONE $DATASET"
+ls -la "$SAVE" | head -20

@@ -168,6 +168,19 @@ cache/
 # Large / license-bound datasets -- do NOT publish (keep the small result files at data/ root)
 data/mt_data/
 word_order_study/data/*/
+itst_study/data/*/
+
+# Third-party checkout: the ictnlp/ITST fairseq fork, rebuilt by itst_study/setup_itst.sh.
+itst_study/ITST/
+
+# Generated artifacts on Katana (large, reproducible from the scripts).
+itst_study/data-bin/
+itst_study/spm/
+itst_study/results/
+itst_study/checkpoints/
+
+# Not part of the repo.
+ITST.pdf
 
 # Local-only: detailed working logs, slide decks, HTML reports (kept on disk, not published).
 # The distilled versions live in each folder's README.md + RESULTS.md.
